@@ -1,5 +1,5 @@
-"""Tests for behav_utils.analysis.group (Tier B: combine / paired_diff /
-bootstrap_units / rank_test / average_arrays).
+"""Tests for behav_utils.analysis.group (combine / paired_diff / bootstrap_units /
+rank_test / average_arrays / collect_rows / compare_groups).
 
 These operate on plain tidy tables and arrays — no SessionData — so they build
 small DataFrames inline rather than using the session fixtures. Covers the
@@ -13,9 +13,15 @@ import pandas as pd
 import pytest
 
 from behav_utils.analysis.group import (
+    ArrayAverage,
+    GroupComparison,
+    RankTest,
+    UnitBootstrap,
     average_arrays,
     bootstrap_units,
+    collect_rows,
     combine,
+    compare_groups,
     paired_diff,
     rank_test,
 )
@@ -136,28 +142,42 @@ class TestPairedDiff:
             out['delta'].to_numpy(), (out['hard_a'] - out['uniform']).to_numpy())
 
 
+class TestPairedDiffPooledRows:
+
+    def test_none_label_columns_do_not_drop_units(self):
+        # Regression: PhaseStats.to_rows() carries distribution=None / session_type='';
+        # pivot_table's default dropna silently emptied the table.
+        rows = []
+        for a in 'ABC':
+            for cond, v in (('on', 0.2), ('off', 0.1)):
+                rows.append(dict(animal=a, session='pooled', session_type='', distribution=None,
+                                 stat='mu', value=v, n_trials=100, condition=cond))
+        out = paired_diff(pd.DataFrame(rows), by='condition', a='on', b='off')
+        assert len(out) == 3 and np.allclose(out['delta'], 0.1)
+
+
 class TestBootstrapUnits:
 
     def test_structure(self):
         res = bootstrap_units([0.1, 0.2, 0.3, 0.4, 0.5], n_boot=500, seed=1)
-        assert res['n'] == 5
-        assert res['lo'] <= res['point'] <= res['hi']
+        assert isinstance(res, UnitBootstrap) and res.n == 5
+        assert res.lo <= res.point <= res.hi
 
     def test_drops_nan(self):
         res = bootstrap_units([0.1, np.nan, 0.3], n_boot=200, seed=1)
-        assert res['n'] == 2
+        assert res.n == 2
 
     def test_small_n_warns_and_nan_ci(self):
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter('always')
             res = bootstrap_units([0.5], n_boot=100)
-        assert res['n'] == 1
-        assert np.isnan(res['lo']) and np.isnan(res['hi'])
+        assert res.n == 1
+        assert np.isnan(res.lo) and np.isnan(res.hi)
         assert any('n<2' in str(w.message) for w in caught)
 
     def test_empty(self):
         res = bootstrap_units([], n_boot=100)
-        assert res['n'] == 0 and np.isnan(res['point'])
+        assert res.n == 0 and np.isnan(res.point)
 
     def test_reproducible(self):
         a = bootstrap_units([0.1, 0.2, 0.3, 0.4], seed=7)
@@ -169,13 +189,14 @@ class TestRankTest:
 
     def test_paired_wilcoxon(self):
         res = rank_test([0.3, 0.4, 0.5, 0.6], [0.1, 0.2, 0.2, 0.3], paired=True)
-        assert res['test'] == 'wilcoxon' and res['paired'] is True
-        assert 0.0 <= res['p'] <= 1.0 and res['n'] == 4
+        assert isinstance(res, RankTest)
+        assert res.test == 'wilcoxon' and res.paired is True
+        assert 0.0 <= res.p <= 1.0 and res.n == 4 and res.min_p == pytest.approx(2 / 16)
 
     def test_unpaired_mannwhitney(self):
         res = rank_test([0.3, 0.4, 0.5], [0.1, 0.2], paired=False)
-        assert res['test'] == 'mannwhitneyu' and res['paired'] is False
-        assert res['n_a'] == 3 and res['n_b'] == 2 and 0.0 <= res['p'] <= 1.0
+        assert res.test == 'mannwhitneyu' and res.paired is False
+        assert res.n_a == 3 and res.n_b == 2 and 0.0 <= res.p <= 1.0
 
     def test_paired_misaligned_raises(self):
         with pytest.raises(ValueError):
@@ -183,26 +204,27 @@ class TestRankTest:
 
     def test_paired_all_zero_diff_is_nan(self):
         res = rank_test([0.2, 0.3], [0.2, 0.3], paired=True)
-        assert np.isnan(res['p'])
+        assert np.isnan(res.p)
 
     def test_paired_drops_nan_pairs(self):
         res = rank_test([0.3, np.nan, 0.5, 0.6], [0.1, 0.2, 0.2, 0.3], paired=True)
-        assert res['n'] == 3
+        assert res.n == 3
 
 
 class TestAverageArrays:
 
     def test_curve(self):
         res = average_arrays([np.random.rand(8) for _ in range(4)])
-        assert res['mean'].shape == (8,) and res['sem'].shape == (8,) and res['n'] == 4
+        assert isinstance(res, ArrayAverage)
+        assert res.mean.shape == (8,) and res.sem.shape == (8,) and res.n == 4
 
     def test_update_matrix(self):
         res = average_arrays([np.random.rand(8, 8) for _ in range(3)])
-        assert res['mean'].shape == (8, 8) and res['n'] == 3
+        assert res.mean.shape == (8, 8) and res.n == 3
 
     def test_mean_correct(self):
         res = average_arrays([np.zeros(4), np.ones(4) * 2])
-        np.testing.assert_allclose(res['mean'], np.ones(4))
+        np.testing.assert_allclose(res.mean, np.ones(4))
 
     def test_shape_mismatch_raises(self):
         with pytest.raises(ValueError):
@@ -216,5 +238,69 @@ class TestAverageArrays:
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter('always')
             res = average_arrays([np.ones(4)])
-        assert res['n'] == 1 and np.isnan(res['sem']).all()
+        assert res.n == 1 and np.isnan(res.sem).all()
         assert any('n<2' in str(w.message) for w in caught)
+
+
+class TestCollectRows:
+
+    def test_explicit_animal_wins_over_row_key(self):
+        rows = collect_rows([{'stat': 'mu', 'value': 0.1, 'animal': 'unknown'}], animal='A01', group='g')
+        assert rows == [{'stat': 'mu', 'value': 0.1, 'animal': 'A01', 'group': 'g'}]
+
+    def test_conflicting_real_id_warns(self):
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter('always')
+            rows = collect_rows([{'stat': 'mu', 'value': 0.1, 'animal': 'B02'}], animal='A01')
+        assert rows[0]['animal'] == 'A01'
+        assert any('collect_rows' in str(w.message) for w in caught)
+
+    def test_labels_and_group_col(self):
+        rows = collect_rows([{'stat': 'mu', 'value': 0.1}], animal='A', group='het',
+                            group_col='genotype', contrast='opto_vs_off')
+        assert rows[0]['genotype'] == 'het' and rows[0]['contrast'] == 'opto_vs_off'
+
+
+class TestCompareGroups:
+
+    @staticmethod
+    def _rows():
+        rows = []
+        for i, a in enumerate('ABCDEF'):
+            rows += collect_rows([{'stat': 'mu', 'value': 0.1 * i}, {'stat': 'acc', 'value': 0.5}],
+                                 animal=a, group='x' if i < 3 else 'y')
+        return rows
+
+    def test_returns_typed_result(self):
+        res = compare_groups(self._rows(), groups=('x', 'y'))
+        assert isinstance(res, GroupComparison)
+        t = res.test('mu')
+        assert isinstance(t, RankTest) and t.n_a == 3 and t.n_b == 3
+        assert t.group_a == 'x' and t.group_b == 'y'
+        assert t.p == pytest.approx(0.1) and t.min_p == pytest.approx(0.1)
+        assert list(res.table()['stat']) == ['mu', 'acc']
+
+    def test_name_list_split(self):
+        res = compare_groups(self._rows(), groups={'low': ['A', 'B'], 'high': ['E', 'F']})
+        assert res.test('mu').n_a == 2 and res.test('mu').group_a == 'low'
+
+    def test_unknown_group_column_raises(self):
+        with pytest.raises(ValueError):
+            compare_groups(self._rows(), group_col='nope')
+
+    def test_paired_aligns_by_animal(self):
+        rows = []
+        for i, a in enumerate('ABCD'):
+            rows += collect_rows([{'stat': 'mu', 'value': 0.1 * i}], animal=a, cond='on')
+            rows += collect_rows([{'stat': 'mu', 'value': np.nan if a == 'B' else 0.1 * i - 0.05}],
+                                 animal=a, cond='off')
+        res = compare_groups(rows, group_col='cond', groups=('on', 'off'), paired=True)
+        t = res.test('mu')
+        assert t.paired and t.n == 3          # B dropped as a pair, not as two unrelated values
+        assert t.statistic == 0               # every remaining Δ positive
+
+    def test_paired_disjoint_animals_raises(self):
+        rows = collect_rows([{'stat': 'mu', 'value': 0.1}], animal='A', cond='on') + \
+            collect_rows([{'stat': 'mu', 'value': 0.2}], animal='B', cond='off')
+        with pytest.raises(ValueError, match='paired'):
+            compare_groups(rows, group_col='cond', groups=('on', 'off'), paired=True)

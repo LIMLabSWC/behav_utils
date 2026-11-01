@@ -9,6 +9,8 @@ derivation (both rules), date-resolution fallback, drop_last_row, the min_trials
 gate, animal_metadata.json merging, and masking/washout session_type stamping.
 """
 import json
+import pickle
+import warnings
 from datetime import date
 
 import numpy as np
@@ -382,3 +384,107 @@ class TestLoadAnimalAndExperiment:
         cfg = _minimal_config(data_dir=tmp_path / 'nope', drop_last_row=False)
         with pytest.raises(FileNotFoundError):
             load_experiment(cfg)
+
+
+# ── stimulus normalisation, choice-encoding warning, strict loading ──────────
+class TestStimulusTransform:
+    def test_identity_by_default(self):
+        t = TaskConfig(inputs=[], outputs=[])
+        assert t.is_identity_transform
+        x = np.array([-1.0, -0.2, 0.0, 0.7, np.nan])
+        np.testing.assert_array_equal(t.normalise_stimulus(x), x)
+
+    def test_linear_asymmetric_range_puts_boundary_at_zero(self):
+        t = TaskConfig(inputs=[], outputs=[], boundary=0.2, stimulus_range=(-1.0, 1.0))
+        np.testing.assert_allclose(t.normalise_stimulus([-1.0, 0.2, 1.0, 0.6, -0.4]),
+                                   [-1.0, 0.0, 1.0, 0.5, -0.5])
+
+    def test_log_scale(self):
+        t = TaskConfig(inputs=[], outputs=[], boundary=8000.0, stimulus_range=(2000.0, 16000.0),
+                       stimulus_scale='log')
+        np.testing.assert_allclose(t.normalise_stimulus([2000.0, 4000.0, 8000.0, 16000.0]),
+                                   [-1.0, -0.5, 0.0, 1.0])
+
+    def test_invalid_configs_raise(self):
+        with pytest.raises(ValueError):
+            TaskConfig(inputs=[], outputs=[], boundary=2.0, stimulus_range=(-1.0, 1.0))
+        with pytest.raises(ValueError):
+            TaskConfig(inputs=[], outputs=[], stimulus_scale='sqrt')
+        with pytest.raises(ValueError):
+            TaskConfig(inputs=[], outputs=[], boundary=1.0, stimulus_range=(0.0, 2.0), stimulus_scale='log')
+
+    def test_loader_applies_transform_and_keeps_raw(self, tmp_path):
+        cfg = _minimal_config(drop_last_row=False)
+        cfg.task.boundary, cfg.task.stimulus_range, cfg.task.stimulus_scale = 8000.0, (2000.0, 16000.0), 'log'
+        p = tmp_path / 'trial_summary.csv'
+        raw = np.array([2000.0, 4000.0, 8000.0, 16000.0, 11313.7085])
+        pd.DataFrame({'Trial_Number': range(1, 6), 'Stim': raw, 'Choice': [0, 0, 1, 1, 1]}).to_csv(p, index=False)
+        sess = load_session_csv(p, cfg, session_date=date(2024, 3, 15))
+        np.testing.assert_allclose(sess.trials.stimulus, [-1.0, -0.5, 0.0, 1.0, 0.5], atol=1e-6)
+        np.testing.assert_allclose(sess.trials.stimulus_raw, raw)
+        np.testing.assert_array_equal(sess.trials.category, [0, 0, 0, 1, 1])   # category from the normalised axis
+        assert 'stimuli_raw' in sess.get_arrays()
+
+    def test_mostly_nan_choices_warn(self, tmp_path):
+        cfg = _minimal_config(drop_last_row=False, no_response_value=-1)
+        p = tmp_path / 'trial_summary.csv'
+        pd.DataFrame({'Trial_Number': range(1, 11), 'Stim': np.linspace(-1, 1, 10),
+                      'Choice': [-1] * 6 + [1] * 4}).to_csv(p, index=False)
+        with pytest.warns(UserWarning, match='no-response'):
+            load_session_csv(p, cfg, session_date=date(2024, 3, 15))
+
+
+class TestStrictLoading:
+    def _tree(self, tmp_path, broken=False):
+        animal = tmp_path / 'A01'
+        for i, d in enumerate(['2024_03_15', '2024_03_16']):
+            sd = animal / d
+            sd.mkdir(parents=True)
+            _write_csv(sd / 'trial_summary.csv', n=11, seed=i)
+        if broken:
+            (animal / '2024_03_17').mkdir()
+            pd.DataFrame({'Trial_Number': [1, 2], 'Choice': [0, 1]}).to_csv(
+                animal / '2024_03_17' / 'trial_summary.csv', index=False)   # missing 'Stim'
+        return animal
+
+    def test_strict_raises_on_broken_session(self, tmp_path):
+        animal = self._tree(tmp_path, broken=True)
+        cfg = _minimal_config(data_dir=tmp_path, drop_last_row=False)
+        with pytest.raises(RuntimeError, match='2024_03_17'):
+            load_animal(animal, cfg)
+
+    def test_non_strict_skips_and_logs(self, tmp_path):
+        animal = self._tree(tmp_path, broken=True)
+        cfg = _minimal_config(data_dir=tmp_path, drop_last_row=False)
+        a = load_animal(animal, cfg, strict=False)
+        assert a.n_sessions == 2
+
+    def test_experiment_loads_and_presets_attach_to_config(self, tmp_path):
+        self._tree(tmp_path)
+        cfg = _minimal_config(data_dir=tmp_path, drop_last_row=False)
+        cfg.session_presets = {'first': {'first_n': 1}}
+        exp = load_experiment(cfg)
+        animal = exp.get_animal('A01')
+        from behav_utils import select_sessions
+        assert [s.session_idx for s in select_sessions(animal, preset='first', min_trials=0)] == [0]
+
+
+class TestSnapshotProvenance:
+    def test_save_stamps_version_and_load_warns_on_mismatch(self, tmp_path):
+        import behav_utils
+        from behav_utils.data.structures import ExperimentData
+        from behav_utils.data.synthetic import generate_synthetic_animal
+        a, _ = generate_synthetic_animal(animal_id='A', n_sessions=2, trials_per_session=50, stage='task', seed=0)
+        exp = ExperimentData()
+        exp.add_animal(a)
+        p = tmp_path / 'snap.pkl'
+        exp.save(p)
+        assert exp.metadata['behav_utils_version'] == behav_utils.__version__
+        with warnings.catch_warnings():
+            warnings.simplefilter('error')
+            ExperimentData.load(p)                                   # same version: silent
+        exp.metadata['behav_utils_version'] = '0.0.0'      # re-pickle by hand: save() would re-stamp
+        with open(p, 'wb') as f:
+            pickle.dump(exp, f)
+        with pytest.warns(UserWarning, match='0.0.0'):
+            ExperimentData.load(p)

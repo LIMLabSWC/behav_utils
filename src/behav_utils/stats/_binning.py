@@ -1,23 +1,17 @@
-"""Stimulus binning shared by the stats that bin on the stimulus axis."""
+"""Stimulus binning for the stats that bin on the stimulus axis.
+
+One grid for the whole library: ``behav_utils.readouts._base`` owns it; this
+module only re-exports it and adds the hard/easy threshold.
+"""
 
 from __future__ import annotations
 
-import numpy as np
+from behav_utils.readouts._base import STIMULUS_RANGE, bin_centres, bin_edges, bin_index
 
-STIMULUS_RANGE = (-1.0, 1.0)
 DEFAULT_N_BINS = 8
-HARD_THRESHOLD = 0.3          # |stimulus| below this is a "hard" trial
+HARD_THRESHOLD = 0.3          # |stimulus| below this is a "hard" trial (normalised axis)
 
+bin_midpoints = bin_centres
 
-def bin_edges(n_bins: int = DEFAULT_N_BINS) -> np.ndarray:
-    return np.linspace(STIMULUS_RANGE[0], STIMULUS_RANGE[1], n_bins + 1)
-
-
-def bin_index(stimulus: np.ndarray, n_bins: int = DEFAULT_N_BINS) -> np.ndarray:
-    """Bin index in [0, n_bins) for each stimulus (clipped at the range ends)."""
-    return np.clip(np.digitize(stimulus, bin_edges(n_bins)) - 1, 0, n_bins - 1)
-
-
-def bin_midpoints(n_bins: int = DEFAULT_N_BINS) -> np.ndarray:
-    e = bin_edges(n_bins)
-    return (e[:-1] + e[1:]) / 2
+__all__ = ['STIMULUS_RANGE', 'DEFAULT_N_BINS', 'HARD_THRESHOLD', 'bin_edges', 'bin_index',
+           'bin_centres', 'bin_midpoints']

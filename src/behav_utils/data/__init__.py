@@ -5,10 +5,10 @@ Hierarchical containers, config-driven loading, session selection,
 trial-level filtering, and synthetic generation.
 
 Pipeline:
-    load_experiment(config)                           → ExperimentData
-    select_sessions(animal, preset='expert_uniform')  → List[SessionData]
-    filter_trials(sessions, mask_fn)                  → List[SessionData]
-    pool_arrays(filtered_sessions)                    → dict of arrays
+    load_experiment(config)                            → ExperimentData
+    select_sessions(animal, preset='expert')           → List[SessionData]
+    filter_trials(sessions, trial_type='non_opto')     → List[SessionData]
+    TrialArrays.from_sessions(clean)                   → TrialArrays (pool_arrays underneath)
 """
 
 from behav_utils.data.loading import (
@@ -33,6 +33,7 @@ from behav_utils.data.structures import (
     ExperimentData,
     SessionData,
     SessionMetadata,
+    SessionSummary,
     TrialData,
 )
 from behav_utils.data.synthetic import (
@@ -55,6 +56,7 @@ __all__ = [
     'AnimalData',
     'SessionData',
     'SessionMetadata',
+    'SessionSummary',
     'TrialData',
 
     # Selection (session-level)

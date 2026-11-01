@@ -47,6 +47,5 @@ session_metadata:
     csv_name: "training_phase"
     dtype: str
 
-analysis:
-  default_stage: "full_task"
-  hard_threshold: 10.0                  # degrees from boundary
+# No analysis: section — the library computes on the normalised axis (boundary 45° → 0,
+# 0° → -1, 90° → +1); "hard" trials are |normalised stimulus| < 0.3, i.e. within 13.5° of the boundary.

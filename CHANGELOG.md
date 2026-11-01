@@ -1,5 +1,68 @@
 # Changelog
 
+## 0.8.0 — 2026-10-31
+
+Handover release. Number-affecting defaults are marked ▲.
+
+### Fixed
+- `infer_animal_id` never found the id the loader writes (`session.metadata.animal_id`), so
+  `PhaseStats.animal` was `'unknown'` and `collect_rows` let that overwrite the explicit `animal=`:
+  every animal collapsed into one unit in `compare_groups` (the example notebook's group section
+  reported n = 1 vs 1). Both fixed; `collect_rows(animal=...)` now always wins and warns on a conflict.
+- `paired_diff` dropped every pooled row (`distribution=None` is a pivot index key; pandas' default
+  `dropna` discarded it). `dropna=False`.
+- `compare_groups(paired=True)` dropped non-finite values per group independently, so pairs could
+  misalign silently; values are now aligned by `unit_col` and disjoint animal sets raise.
+- `filter_trials`: `trial_type` silently discarded a passed `mask_fn` (now raises); `trial_type` with
+  `exclude_abort=False` kept aborts (now every `trial_type` drops aborts).
+- Docs: `data_structures_reference.md` rewritten against the real API (`compute_delta_stat` kwargs,
+  non-existent `get_animals` / `trials.get_arrays` / `'trial_indices'`, `get_arrays` "excludes aborts",
+  `opto_mask('control')` adjacency) and executed by `docs/run_doc_examples.py`; stale module docstrings
+  in `structures`, `selection`, `filtering`, `group`, `config`, `data.ops`; README install pin; the
+  go/no-go and orientation example configs (dead `analysis:` section, raw-unit stimuli).
+
+### Changed ▲
+- `compute_delta_stat(n_permutations=0)` by default; `n_permutations > 0` raises unless every phase
+  shares a session with the reference. Calls that passed `n_permutations` explicitly on within-session
+  contrasts are unchanged; calls that relied on the default lose a p they should not have had.
+- `rank_test -> RankTest`, `bootstrap_units -> UnitBootstrap`, `average_arrays -> ArrayAverage`,
+  `compare_groups -> GroupComparison` (`.test(stat)`, `.table()`): frozen dataclasses instead of dicts
+  (rule 2). Values identical; access is by attribute.
+- `SessionData.summary() -> SessionSummary` (`.accuracy`, formerly `['perf']`).
+- `AnimalData.session_table` is counts + accuracy only (`SESSION_TABLE_COLUMNS`); it no longer runs
+  every registered statistic (including the `pse_dynamics` curve fit) on every session, which cost
+  ~0.7 s per session and was a data→stats import.
+- Plotting: `plot_stat_comparison` / `plot_interaction` are now the single-panel plotters (formerly
+  `*_single`); the grids are `plot_stat_comparison_grid` / `plot_interaction_grid`, the one documented
+  exception to "layout is the caller's".
+- Loading: `print` → `logging` (`behav_utils.data.loading`); `load_animal` / `load_experiment` take
+  `strict=True` (a broken session raises instead of being skipped with a warning).
+- Session presets resolve on the animal's own config (`ExperimentData.config.session_presets`) before
+  the process-wide registry; `preset_from_spec` exported.
+- `SessionMetadata` loses the project-vocabulary properties `sound_contingency`, `stim_range_min/max`
+  (`.get()` still works).
+
+### Added
+- Stimulus normalisation at load: `task.stimulus_scale` (`linear` | `log`) alongside `boundary` and
+  `stimulus_range`; `TaskConfig.normalise_stimulus` maps raw units onto `[-1, 1]` with the boundary at
+  0 (identity for the defaults). `TrialData.stimulus_raw` keeps the CSV value; `pool_arrays` adds
+  `stimuli_raw`. `stimulus_range` was parsed and never used before: configs in Hz or degrees produced
+  silently wrong bins.
+- `TrialArrays.trial_key` (int64 `session_idx * 10**6 + trial_number`), carried through `take`,
+  `valid`, `lag1_pairs`, `concat` and every resample; `trial_key_of`, `with_trial_key`,
+  `TrialArrays.concat`. The hook for aligning neural (or any per-trial) data.
+- Go/no-go support documented: the two config differences (`docs/config_guide.md`), a table of what
+  each statistic measures (`docs/stats_reference.md`), the loader's NaN-choice warning.
+- `plot_rolling_stats(result, stat, ax=None)` for `RollingStats`.
+- `ExperimentData.save` stamps `behav_utils_version` / `config_name`; `load` warns on a version mismatch.
+- `docs/run_doc_examples.py` (run in CI).
+
+### Removed
+- `analysis/session_features.py` (`compute_session_features`): a dict result, mislabelled
+  `n_trials_abort` / `abort_rate` (they counted no-response), duplicating `compute_phase_stats(per_session=True)`
+  and `stats/rt.py`.
+- The second copy of the stimulus-binning helpers (`stats/_binning.py` now re-exports `readouts/_base.py`).
+
 ## 0.7.1 — 2026-10
 - `SessionFilter.last_n_qualifying`: the last N sessions that pass the quality filters
   (`min_accuracy`, `max_accuracy`, `min_trials`). `last_n` is unchanged and still applied before

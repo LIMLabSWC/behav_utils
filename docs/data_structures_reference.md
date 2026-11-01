@@ -12,7 +12,13 @@ ExperimentData                    All animals in a project
               └── TrialData        Trial-by-trial arrays
 ```
 
-`TrialArrays` (`behav_utils.data.arrays`) is the flat, pooled view every statistic and readout computes from; `TrialArrays.from_sessions(clean)` builds it (`pool_arrays` is the raw dict underneath).
+`TrialArrays` (`behav_utils.data.arrays`) is the flat, pooled view every statistic and readout
+computes from; `TrialArrays.from_sessions(clean)` builds it (`pool_arrays` is the raw dict
+underneath). The data classes hold data only: filtering lives in `behav_utils.data.ops`,
+statistics in `behav_utils.stats` / `behav_utils.analysis`.
+
+Every code block below runs against the current API (`sessions`, `animal`, `clean`, `experiment`
+are whatever the pipeline produced; `docs/run_doc_examples.py` executes them on synthetic data).
 
 ---
 
@@ -25,20 +31,30 @@ The lowest level — per-trial arrays for a single session.
 | Field | Type | Description |
 |-------|------|-------------|
 | `trial_number` | int array | Original trial numbers from CSV |
-| `stimulus` | float array | Stimulus values |
+| `stimulus` | float array | Stimulus on the library's axis: [-1, 1], boundary at 0 (see `docs/config_guide.md`, *The stimulus axis*) |
+| `stimulus_raw` | float array | Stimulus as read from the CSV |
 | `choice` | float array | Category-space choice: 0=A, 1=B, NaN=no response |
 | `choice_raw` | float array | Raw choice from CSV (before conversion) |
-| `outcome` | str array | Trial outcome ('Correct', 'Incorrect', 'Abort') |
+| `outcome` | str array | Trial outcome label from CSV |
 | `correct` | bool array | Whether choice matched category |
-| `category` | int array | Derived from stimulus: 0=A, 1=B |
+| `category` | int array | Derived from the normalised stimulus: 0=A, 1=B |
 
 ### Optional Fields
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `reaction_time` | float array | Response latency (NaN for aborts) |
-| `abort` | bool array | Whether animal broke fixation |
-| `opto_on` | bool array | Whether optogenetics was active |
+| `reaction_time` | float array | Response latency (NaN if missing) |
+| `abort` | bool array | Trial aborted |
+| `opto_on` | bool array | Laser on this trial |
+| `distribution` | str array | Stimulus distribution label |
+| `optional_fields`, `extra` | dict | Other mapped / unmapped CSV columns |
+
+### Lag-1 view
+
+`prev_stimulus`, `prev_choice`, `prev_correct`, `prev_category`, `prev_reaction_time`,
+`prev_opto_on`, `prev_has_prev` are frozen on the raw session (the predecessor is the previous
+non-abort trial; NaN where there is none) and sliced, never recomputed, through filtering and
+pooling. `trials.prev_trial` exposes them as a `PrevTrial`.
 
 ### Properties
 
@@ -47,25 +63,6 @@ The lowest level — per-trial arrays for a single session.
 | `.n_trials` | int | Total trial count |
 | `.no_response` | bool array | True where `choice` is NaN |
 | `.valid_mask` | bool array | `~abort & ~no_response` |
-
-### `get_arrays()`
-
-Extract analysis-ready arrays. **No kwargs** — always excludes aborts (invalid data), returns everything else. All scientific filtering (opto, no-response, custom) happens upstream via module-level functions.
-
-```python
-arrays = session.trials.get_arrays()
-```
-
-Returns dict:
-
-| Key | Description |
-|-----|-------------|
-| `'stimuli'` | Stimulus values |
-| `'categories'` | True categories 0/1 |
-| `'choices'` | Choices 0/1/NaN |
-| `'no_response'` | Boolean mask for NaN choices |
-| `'reaction_times'` | RT values |
-| `'trial_indices'` | Original indices for back-mapping |
 
 ---
 
@@ -77,48 +74,53 @@ One behavioural session — metadata + trial data.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `session_id` | str | Unique identifier |
+| `session_id` | str | Unique identifier (the session directory name) |
 | `session_idx` | int | Ordinal position within animal (0-based) |
 | `date` | datetime.date | Session date |
 | `metadata` | SessionMetadata | Task parameters |
 | `trials` | TrialData | Trial-by-trial arrays |
 | `session_type` | str | `'regular'` / `'opto'` (derived) or a type stamped from `config.session_types` |
-| `filter_info` | dict or None | Metadata about filtering applied |
+| `filter_info` | dict or None | What filtering produced this session (`label`, counts, `selection`) |
 
-### Properties
+### Properties and methods
 
-| Property | Returns | Description |
+| Name | Returns | Description |
 |----------|---------|-------------|
 | `.n_trials` | int | Total trials (reflects filtering) |
 | `.stage` | str | Training stage (from metadata) |
-| `.distribution` | str | Stimulus distribution |
+| `.distribution` | str | Stimulus distribution (majority label of the trials, else metadata) |
 | `.is_filtered` | bool | Whether filtering has been applied |
+| `.summary()` | `SessionSummary` | counts and accuracy — `n_trials, n_valid, n_abort, n_no_response, accuracy, …` |
+| `.get_arrays()` | dict | the trial arrays (a pure projection — **nothing is filtered, aborts included**); see `pool_arrays` for the keys |
 
 ### Filtering trials
 
-Filtering uses module-level functions from `behav_utils.data.ops.filtering`:
+Filtering uses module-level functions from `behav_utils.data.ops.filtering`; the data classes have
+no filter methods.
 
 ```python
-from behav_utils.data.ops.filtering import filter_session, opto_mask, filter_trials
+from behav_utils import filter_trials
+from behav_utils.data.ops.filtering import build_mask, filter_session, opto_mask
 
-# Standard filter: drop aborts and opto trials
-clean = filter_session(session)
+clean = filter_trials(sessions, trial_type='non_opto')   # aborts and laser-on trials dropped
+allv  = filter_trials(sessions, trial_type='all')        # aborts dropped, laser trials kept
+opto  = filter_trials(sessions, trial_type='opto')       # laser-on trials only
+post  = filter_trials(sessions, trial_type='post_opto')  # first laser-off trial after each run
 
-# Opto trials only
-opto_only = filter_session(session, opto_mask(session.trials, 0))
-
-# Control trials (non-opto, not adjacent to opto)
-ctrl = filter_session(session, opto_mask(session.trials, 'control'))
-
-# Filter list of sessions at once
-clean_list = filter_trials(sessions)
+one = filter_session(sessions[0])                                      # one session, standard mask
+pre = filter_trials(sessions, mask_fn=lambda s: build_mask(s.trials) & opto_mask(s.trials, -1),
+                    label='pre-opto')                                  # anything else: a mask_fn
 ```
+
+`trial_type` always drops aborts and keeps no-response trials (NaN choice; every statistic ignores
+them). `trial_type` and `mask_fn` are exclusive.
 
 `opto_mask(trials, delta)`:
 - `delta=0` — opto trials themselves
-- `delta=1` — first trial after each opto trial
-- `delta=-1` — trial before each opto trial
-- `delta='control'` — non-opto trials (not adjacent to opto)
+- `delta=k>0` — k-th non-abort, non-opto trial after each opto run
+- `delta=-k` — k-th non-abort, non-opto trial before each opto run
+- `delta='control'` — every non-abort, non-opto trial (adjacency is *not* considered)
+- `delta=None` — every non-abort trial
 
 ---
 
@@ -128,9 +130,12 @@ Task parameters constant within a session. Access by attribute or `.get()`:
 
 ```python
 session.metadata.stage
-session.metadata.get('sound_contingency')
-session.metadata.fields  # raw dict
+session.metadata.animal_id
+session.metadata.get('protocol')
+session.metadata.fields          # raw dict
 ```
+
+Only `animal_id` and `stage` are read by the library; everything else is your config's vocabulary.
 
 ---
 
@@ -152,6 +157,8 @@ One animal — all sessions in chronological order.
 |----------|---------|-------------|
 | `.n_sessions` | int | Session count |
 | `.session_ids` | list[str] | All session IDs |
+| `.stages` | list[str] | Stages present, in order of first appearance |
+| `.session_table` | DataFrame | one row per session: `session_idx, session_id, date, stage, distribution, session_type, n_trials, n_valid, n_abort, n_no_response, accuracy` — a view for picking sessions, not a statistics table |
 
 ### Working with an animal
 
@@ -162,8 +169,8 @@ from behav_utils import compute_psychometric_curve, plot_psychometric_curve, PAL
 # 1. Select sessions (presets come from your config's session_presets)
 sessions = select_sessions(animal, preset='expert')
 
-# 2. Filter trials (abort / no-response / opto exclusions)
-clean = filter_trials(sessions)
+# 2. Filter trials
+clean = filter_trials(sessions, trial_type='non_opto')
 
 # 3. Compute a readout on the pooled arrays
 curve = compute_psychometric_curve(TrialArrays.from_sessions(clean), n_bootstrap=200)
@@ -179,22 +186,47 @@ plot_psychometric_curve(curve, ax=ax, color=PALETTE[0])
 
 All animals in one project.
 
-### Fields
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `animals` | dict[str, AnimalData] | animal_id → AnimalData |
-| `config` | ProjectConfig or None | Loaded config |
-
-### Methods
+| Field / method | Description |
+|---|---|
+| `animals` | `{animal_id: AnimalData}` |
+| `config` | the `ProjectConfig` it was loaded with (dropped on `save`) |
+| `metadata` | dict; `save()` stamps `behav_utils_version` and `config_name` |
+| `.animal_ids`, `.n_animals` | sorted ids / count |
+| `.get_animal(id)` | one animal (KeyError with the available ids otherwise) |
+| `.summary()` | one row per animal: sessions, stages, first/last date |
+| `.save(path)` / `ExperimentData.load(path)` | pickle; `load` warns if the library version differs |
 
 ```python
-from behav_utils.data.loading import load_experiment
+from behav_utils import load_experiment
 
-experiment = load_experiment('config.yaml')
+experiment = load_experiment('config.yaml')           # strict=True: a broken session raises
 animal = experiment.get_animal('A05')
-all_animals = experiment.get_animals(min_sessions=10)
+experiment.save('snapshot.pkl')
 ```
+
+---
+
+## TrialArrays
+
+The one input type every statistic and readout consumes: aligned 1-D float arrays
+`choice, stimulus, category, prev_choice, prev_stimulus, prev_category, reaction_time`, plus
+`trial_key` (int64, `session_idx * 10**6 + trial_number`) when built from sessions.
+
+```python
+from behav_utils import TrialArrays, compute_stats, PSYCHOMETRIC
+
+arrays = TrialArrays.from_sessions(clean)      # the pipeline path
+arrays.n_trials, arrays.n_responded            # counts
+arrays.valid()                                 # responded trials only
+arrays.lag1_pairs()                            # responded with a usable predecessor
+arrays.take(arrays.stimulus > 0)               # row subset; prev_* and trial_key travel with the rows
+arrays.trial_key                               # mask an external per-trial dataset to exactly these rows
+```
+
+`trial_key` survives every `take`, `valid` and resample (a repeated trial carries its key twice), so
+a neural tensor indexed by the same key can be aligned to the trials a statistic actually used.
+`TrialArrays.from_sequence(choice, stimulus, category)` builds one contiguous block (a simulator
+output) with no key.
 
 ---
 
@@ -217,7 +249,7 @@ animal = experiment.get_animal('A05')
 
 # 2. SELECT sessions, FILTER trials
 sessions = select_sessions(animal, preset='expert')
-clean = filter_trials(sessions)
+clean = filter_trials(sessions, trial_type='non_opto')
 arrays = TrialArrays.from_sessions(clean)
 
 # 3. COMPUTE — scalars, readouts, per-session trajectory
@@ -237,37 +269,44 @@ plot_trajectory(traj, 'accuracy', ax=axes[2])
 
 ```python
 from behav_utils import filter_trials, compute_delta_stat, compute_interaction, PSYCHOMETRIC
-from behav_utils.plotting import plot_comparison, plot_stat_comparison, plot_interaction
+from behav_utils.plotting import plot_comparison, plot_stat_comparison, plot_stat_comparison_grid
 
 off = filter_trials(sessions, trial_type='non_opto')
 on  = filter_trials(sessions, trial_type='opto')
 
-d = compute_delta_stat({'off': off, 'on': on}, stats=['accuracy', *PSYCHOMETRIC], reference='off',
-                       n_bootstrap=1000, n_permutations=1000, resample_units=('trials', 'sessions'))
-plot_comparison(d)                        # psychometric curves of both conditions
-plot_stat_comparison(d, ['mu', 'sigma'])  # Δ with intervals per stat
+# Within-session, per-trial randomised label: a permutation p is valid, and trials are a valid unit
+d = compute_delta_stat({'off': off, 'on': on}, ['accuracy', *PSYCHOMETRIC], reference='off',
+                       n_bootstrap=1000, n_permutations=1000, units=('trials', 'sessions'))
+fig, axes = plt.subplots(1, 2)
+plot_comparison(d, ax=axes[0])                    # psychometric curves of both conditions
+plot_stat_comparison(d, 'mu', ax=axes[1])         # one stat: a point + CI per phase
+plot_stat_comparison_grid(d, ['mu', 'sigma'])     # the layout helper: one panel per stat
+
+# Different sessions (e.g. two distributions): no permutation, sessions are the unit
+d2 = compute_delta_stat({'uniform': clean_uniform, 'hard': clean_hard}, ['mu'], reference='uniform',
+                        units=('sessions',))
 ```
 
-`compute_delta_stat` returns a `DeltaStats`:
+`compute_delta_stat` refuses `n_permutations > 0` when a phase shares no session with the
+reference, and `n_permutations` defaults to 0. It returns a `DeltaStats`:
 
 | field | what it holds |
 |---|---|
 | `phases` | `{label: PhaseSummary}` — observed `stats` (Series), `n_trials`, `n_sessions`, bootstrap `draws` per unit, optional `curve` / `update_matrix` |
-| `contrasts` | `{key: Contrast}` — one per non-reference phase: `diff` (a − b), `difference_draws` per unit, `perm_p` (trial permutation, when valid), `um_diff` / `um_rmse` / `um_corr` |
+| `contrasts` | `{key: Contrast}` — one per non-reference phase: `diff` (a − b), `difference_draws` per unit, `perm_p` (trial permutation, when requested), `um_diff` / `um_rmse` / `um_corr` |
 | `reference` | the reference label |
 
 `Contrast.boot(unit)` gives `ci_lo, ci_hi, p, median, n_draws` per stat; `Contrast.table(unit)` one
 tidy row per stat (`diff, ci_lo, ci_hi, boot_p, perm_p, unit`). Units: `'trials'` (valid only when the
 condition was randomised per trial) and `'sessions'` (always valid). `compute_interaction(d1, d2, key)`
-gives the delta of deltas as an `Interaction`, with `plot_interaction`.
+gives the delta of deltas as an `Interaction`, with `plot_interaction(ix, stat, ax=)`.
 
 ### Group-level claims (across animals)
 
-For across-animal comparisons (two groups, or paired on/off effects), use the
-group-level functions — never pool trials across animals.
-
-`compute_phase_stats` turns each animal's sessions into one pooled row per stat;
-`analysis.group` tests the per-animal values. The *animal* is the unit.
+For across-animal comparisons (two groups, or paired on/off effects), use the group-level functions —
+never pool trials across animals. `compute_phase_stats` turns each animal's sessions into one pooled
+row per stat (stamped with the animal id from the data); `analysis.group` tests the per-animal
+values. The *animal* is the unit.
 
 ```python
 from behav_utils.analysis import collect_rows, compare_groups, paired_diff, bootstrap_units
@@ -275,19 +314,23 @@ from behav_utils import compute_phase_stats, PSYCHOMETRIC
 
 # One pooled row per animal, stamped with its group
 rows = []
-for a in animals:
-    r = compute_phase_stats(sessions_of(a), [*PSYCHOMETRIC, 'accuracy'])
-    rows += collect_rows(r.to_rows().to_dict('records'), animal=a.animal_id,
-                         group=a.metadata['group'])
+for animal in experiment.animals.values():
+    clean = filter_trials(select_sessions(animal, preset='expert'), trial_type='non_opto')
+    r = compute_phase_stats(clean, [*PSYCHOMETRIC, 'accuracy'])
+    rows += collect_rows(r.to_rows().to_dict('records'), animal=animal.animal_id,
+                         group=animal.metadata['group'])
 
 # Unpaired (between-group): one rank test per stat, control first
-res = compare_groups(rows, groups=('control', 'treated'))
-res['mu']['p'], res['mu']['min_p']        # min_p = floor at these group sizes
+res = compare_groups(rows, groups=('control', 'treated'))       # GroupComparison
+res.test('mu').p, res.test('mu').min_p                            # min_p = floor at these group sizes
+res.table()                                                       # one tidy row per stat
 
 # Paired (on vs off within the same animals): per-animal Δ, then an across-animal CI
 points = pd.DataFrame(rows_on + rows_off)                 # rows stamped condition='on' / 'off'
 delta = paired_diff(points, by='condition', a='on', b='off')
-bootstrap_units(delta[delta.stat == 'mu'].delta.values)
+bootstrap_units(delta[delta.stat == 'mu'].delta.values)   # UnitBootstrap(point, lo, hi, n)
+# or in one call, aligned by animal:
+compare_groups(rows_on + rows_off, group_col='condition', groups=('on', 'off'), paired=True)
 ```
 
 ---
@@ -304,7 +347,8 @@ Psychometric fit parameters use math names everywhere in code:
 | `lapse_high` | λ_high | Upper asymptote lapse |
 | `accuracy` | Accuracy | Overall correctness |
 
-Plot functions automatically translate `mu`/`sigma` to `PSE`/`slope` for y-axis labels. You write `'mu'` in code; the plot shows "PSE".
+Plot functions translate `mu`/`sigma` to `PSE`/`slope` for y-axis labels. You write `'mu'` in code;
+the plot shows "PSE".
 
 ```python
 # Per-session trajectory of PSE
@@ -345,9 +389,8 @@ animal, info = generate_synthetic_animal(
 )
 
 # Custom simulator: any (stimuli, categories, rng, **kwargs) -> choices callable
-def my_simulator(stimuli, categories, rng, **kwargs):
-    ...
-    return choices
+def my_simulator(stimuli, categories, rng, my_param=0.5, **kwargs):
+    return (stimuli + rng.normal(0, my_param, len(stimuli)) > 0).astype(float)
 
 animal, info = generate_synthetic_animal(
     simulator=my_simulator,

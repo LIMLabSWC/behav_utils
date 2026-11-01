@@ -32,7 +32,9 @@ from behav_utils.stats import PSYCHOMETRIC, compute_stats
 
 
 # ── synthetic phase builder (criterion shift = mu displacement) ──────────────
-def _phase(n_sessions=2, n=250, shift=0.0, noise=0.15, seed=0, with_aborts=False):
+def _phase(n_sessions=2, n=250, shift=0.0, noise=0.15, seed=0, with_aborts=False, shared_ids=True):
+    """``shared_ids=True`` gives every phase the same session ids — the
+    within-session (per-trial label) design a permutation p is valid for."""
     sessions = []
     for i in range(n_sessions):
         rng = np.random.default_rng(seed * 100 + i)
@@ -48,7 +50,7 @@ def _phase(n_sessions=2, n=250, shift=0.0, noise=0.15, seed=0, with_aborts=False
                        choice=ch, outcome=(ch == cat).astype(float),
                        correct=(ch == cat), abort=abort, opto_on=np.zeros(n, bool))
         sessions.append(SessionData(
-            session_id=f's{seed}_{i}', session_idx=i,
+            session_id=f's_{i}' if shared_ids else f's{seed}_{i}', session_idx=i,
             date=date(2026, 1, 1) + timedelta(days=i),
             metadata=SessionMetadata(fields={'stage': 'Full_Task_Cont',
                                              'distribution': 'Uniform'}),

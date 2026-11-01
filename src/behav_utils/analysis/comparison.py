@@ -15,7 +15,9 @@ instead of contributing its variance twice.
 
 Two engines (see ``behav_utils.analysis.resampling``): a per-trial or
 per-session bootstrap for intervals, and — only where the label was randomised
-per trial (opto within a session type) — a permutation null for a p-value.
+per trial (opto within a session type) — a permutation null for a p-value. The
+permutation is off by default and refused when the phases share no sessions:
+trials collected on different days are not exchangeable.
 
 Uncertainty is stored as draws and summarised on demand (``.boot(unit)``,
 ``.table(unit)``), so one result carries the trial-level and session-level
@@ -243,7 +245,7 @@ def compute_delta_stat(
     curve: bool = True,
     update_matrix: bool = False,
     downsample: bool = False,
-    n_permutations: int = 1000,
+    n_permutations: int = 0,
     n_bootstrap: int = 1000,
     units: Sequence[str] = ('trials',),
     n_bins: int = 8,
@@ -266,8 +268,11 @@ def compute_delta_stat(
                         (matched n per unit: trials for stats and the curve,
                         post-correct pairs for the matrix). Removes precision
                         bias at the cost of power.
-        n_permutations: label shuffles for the p-value (0 to skip). Floor is
-                        ``1 / (n_permutations + 1)``.
+        n_permutations: label shuffles for a permutation p (default 0 = none).
+                        Valid only when the label was randomised per trial, so
+                        every non-reference phase must share at least one
+                        session with the reference (same ``session_id``) or
+                        a ValueError is raised. Floor is ``1 / (n_permutations + 1)``.
         n_bootstrap:    resamples per phase per unit (0 to skip).
         units:          resampling units, e.g. ``('trials', 'sessions')``. The
                         first is the default for ``.boot()`` / ``.table()``. A
@@ -280,14 +285,23 @@ def compute_delta_stat(
         :class:`DeltaStats`.
 
     Raises:
-        ValueError: fewer than two phases, unknown reference or unit, or an
-            order-dependent stat requested with trial-level resampling.
+        ValueError: fewer than two phases, unknown reference or unit, an
+            order-dependent stat requested with trial-level resampling, or a
+            permutation requested between phases that share no session.
     """
     items = _as_items(phases, labels)
     order = [lab for lab, _ in items]
     reference = order[0] if reference is None else reference
     if reference not in order:
         raise ValueError(f'compute_delta_stat: reference {reference!r} not among {order}')
+    if n_permutations > 0:
+        ref_ids = {s.session_id for s in dict(items)[reference]}
+        for lab, ph in items:
+            if lab != reference and ref_ids.isdisjoint(s.session_id for s in ph):
+                raise ValueError(
+                    f'compute_delta_stat: n_permutations > 0 but phase {lab!r} shares no session '
+                    f'with the reference {reference!r}; a permutation p is only valid when the '
+                    f'label was randomised per trial. Use n_permutations=0 and units=("sessions",).')
 
     names = tuple(validate_names(names))
     units = tuple(dict.fromkeys(units))

@@ -28,7 +28,7 @@ from behav_utils.readouts import (
     compute_psychometric_curve,
     compute_update_matrix,
 )
-from behav_utils.readouts._base import X_FIT, _ro
+from behav_utils.readouts._base import X_FIT, _ro, bin_edges
 from behav_utils.stats import compute_stats, is_exchangeable, validate_names
 
 __all__ = ['downsample', 'calculate_min_n', 'resample_psychometric_curve', 'resample_update_matrix', 'resample_stat_vectors',
@@ -60,7 +60,7 @@ def _draw(pooled, n, unit, n_bins, rng, replace) -> np.ndarray:
     if total == 0:
         return np.array([], dtype=int)
 
-    edges = np.linspace(-1, 1, n_bins + 1)
+    edges = bin_edges(n_bins)
     strat_var = 'prev_stimuli' if unit == 'pairs' else 'stimuli'
     strat = np.clip(np.digitize(np.asarray(pooled[strat_var])[idx_pool], edges) - 1, 0, n_bins - 1)
 
@@ -421,13 +421,7 @@ def permute_phase_difference(
     a, b = TrialArrays.from_sessions(phase_a), TrialArrays.from_sessions(phase_b)
     a, b = a.valid(), b.valid()
     n_a, n_b = a.n_trials, b.n_trials
-    combined = TrialArrays(
-        np.concatenate([a.choice, b.choice]), np.concatenate([a.stimulus, b.stimulus]),
-        np.concatenate([a.category, b.category]),
-        np.concatenate([a.prev_choice, b.prev_choice]), np.concatenate([a.prev_stimulus, b.prev_stimulus]),
-        np.concatenate([a.prev_category, b.prev_category]),
-        np.concatenate([a.reaction_time, b.reaction_time]),
-    )
+    combined = TrialArrays.concat([a, b])
     take_a = n_trials if n_trials is not None else n_a
     take_b = n_trials if n_trials is not None else n_b
 

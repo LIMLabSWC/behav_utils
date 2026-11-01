@@ -11,7 +11,7 @@ engines on raw arrays (``fit_psychometric``, ``fit_update_matrix``, in ``readout
 ``behav_utils.readouts``; the fit engines are re-exported here for convenience.
 
 Files: ``phase.py`` (compute_phase_stats), ``comparison.py`` (contrasts), ``resampling.py`` (the draw
-engine and draw summaries), ``group.py`` (across-animal tests), ``rolling.py``, ``session_features.py``.
+engine and draw summaries), ``group.py`` (across-animal tests), ``rolling.py``.
 """
 
 from behav_utils.analysis.comparison import (
@@ -24,6 +24,10 @@ from behav_utils.analysis.comparison import (
     contrast_key,
 )
 from behav_utils.analysis.group import (
+    ArrayAverage,
+    GroupComparison,
+    RankTest,
+    UnitBootstrap,
     average_arrays,
     bootstrap_units,
     collect_rows,
@@ -47,7 +51,6 @@ from behav_utils.analysis.resampling import (
     summarise_draws,
 )
 from behav_utils.analysis.rolling import RollingStats, compute_rolling_stats
-from behav_utils.analysis.session_features import compute_session_features
 from behav_utils.data.synthetic import generate_stimuli
 from behav_utils.readouts.fit import (
     cumulative_gaussian,
@@ -68,7 +71,6 @@ __all__ = [
     'downsample', 'calculate_min_n', 'resample_stat_vectors',
     'resample_psychometric_curve', 'resample_update_matrix',
     'RollingStats', 'compute_rolling_stats',
-    'collect_rows', 'compare_groups',
+    'collect_rows', 'compare_groups', 'GroupComparison', 'RankTest', 'UnitBootstrap', 'ArrayAverage',
     'combine', 'paired_diff', 'bootstrap_units', 'rank_test', 'average_arrays', 'min_achievable_p',
-    'compute_session_features',
 ]

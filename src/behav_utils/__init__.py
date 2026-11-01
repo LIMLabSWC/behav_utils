@@ -8,7 +8,7 @@ Pipeline (fixed order):
 
     experiment = load_experiment('config.yaml')
     sessions   = select_sessions(animal, preset='expert')     # which sessions
-    clean      = filter_trials(sessions)                       # which trials
+    clean      = filter_trials(sessions, trial_type='non_opto')  # which trials
     arrays     = TrialArrays.from_sessions(clean)              # TrialArrays
 
     s     = compute_stats(arrays, ['accuracy', *PSYCHOMETRIC]) # scalars  → pd.Series
@@ -33,15 +33,22 @@ from behav_utils.analysis.comparison import (
     compute_delta_stat,
     compute_interaction,
 )
+from behav_utils.analysis.group import (
+    GroupComparison,
+    RankTest,
+    UnitBootstrap,
+    collect_rows,
+    compare_groups,
+    rank_test,
+)
 from behav_utils.analysis.phase import PhaseStats, compute_phase_stats
 from behav_utils.analysis.rolling import RollingStats, compute_rolling_stats
-from behav_utils.analysis.session_features import compute_session_features
 
 # ── Config ───────────────────────────────────────────────────────────────────
-from behav_utils.config.schema import ProjectConfig, load_config
+from behav_utils.config.schema import ProjectConfig, TaskConfig, load_cohorts, load_config
 
 # ── Analysis: low-level (arrays) ─────────────────────────────────────────────
-from behav_utils.data.arrays import TrialArrays
+from behav_utils.data.arrays import TrialArrays, trial_key_of
 
 # ── Loading ──────────────────────────────────────────────────────────────────
 from behav_utils.data.loading import apply_session_type, load_animal, load_experiment, load_session_csv
@@ -61,10 +68,12 @@ from behav_utils.data.ops.filtering import (
 from behav_utils.data.ops.selection import (
     SessionFilter,
     list_presets,
+    preset_from_spec,
     register_preset,
     register_presets_from_config,
     select_sessions,
 )
+from behav_utils.data.ops.switches import Block, block_after, block_before, find_blocks, find_switches
 
 # ── Data structures ──────────────────────────────────────────────────────────
 from behav_utils.data.structures import (
@@ -72,6 +81,7 @@ from behav_utils.data.structures import (
     ExperimentData,
     SessionData,
     SessionMetadata,
+    SessionSummary,
     TrialData,
 )
 
@@ -89,10 +99,16 @@ from behav_utils.plotting import (
     UM_CMAP,
     apply_style,
     get_colour,
+    plot_binned_curve,
     plot_comparison,
+    plot_conditional_psychometric,
     plot_interaction,
+    plot_interaction_grid,
     plot_psychometric_curve,
+    plot_rolling_stats,
+    plot_sd_profile,
     plot_stat_comparison,
+    plot_stat_comparison_grid,
     plot_trajectory,
     plot_update_matrix,
 )
@@ -117,22 +133,23 @@ from behav_utils.readouts.fit import (
 )
 from behav_utils.stats import PSYCHOMETRIC, compute_stats, is_exchangeable, list_stats
 
-__version__ = '0.7.1'
+__version__ = '0.8.0'
 
 __all__ = [
     # Config
-    'load_config', 'ProjectConfig',
+    'load_config', 'load_cohorts', 'ProjectConfig', 'TaskConfig',
 
     # Structures
     'ExperimentData', 'AnimalData', 'SessionData',
-    'SessionMetadata', 'TrialData',
+    'SessionMetadata', 'SessionSummary', 'TrialData',
 
     # Loading
     'load_experiment', 'load_session_csv', 'load_animal', 'apply_session_type',
 
     # Session selection
     'select_sessions', 'SessionFilter',
-    'register_preset', 'list_presets', 'register_presets_from_config',
+    'register_preset', 'list_presets', 'register_presets_from_config', 'preset_from_spec',
+    'find_switches', 'find_blocks', 'block_before', 'block_after', 'Block',
 
     # Trial filtering
     'filter_trials', 'pool_arrays',
@@ -145,7 +162,7 @@ __all__ = [
 
 
     # Arrays, stats, readouts
-    'TrialArrays', 'compute_stats', 'list_stats', 'is_exchangeable', 'PSYCHOMETRIC',
+    'TrialArrays', 'trial_key_of', 'compute_stats', 'list_stats', 'is_exchangeable', 'PSYCHOMETRIC',
     'compute_psychometric_curve', 'compute_update_matrix', 'compute_conditional_psychometric',
     'compute_binned_curve', 'compute_sd_profile',
     'PsychometricCurve', 'UpdateMatrix', 'ConditionalPsychometric', 'BinnedCurve',
@@ -155,9 +172,12 @@ __all__ = [
     'PhaseStats', 'compute_phase_stats',
     'DeltaStats', 'Interaction', 'compute_delta_stat', 'compute_interaction',
     'RollingStats', 'compute_rolling_stats',
-    'compute_session_features', 'cumulative_gaussian', 'generate_stimuli',
+    'collect_rows', 'compare_groups', 'rank_test', 'GroupComparison', 'RankTest', 'UnitBootstrap',
+    'cumulative_gaussian', 'generate_stimuli',
     # Plotting
-    'plot_psychometric_curve', 'plot_update_matrix', 'plot_trajectory',
-    'plot_comparison', 'plot_stat_comparison', 'plot_interaction',
+    'plot_psychometric_curve', 'plot_update_matrix', 'plot_conditional_psychometric',
+    'plot_binned_curve', 'plot_sd_profile', 'plot_trajectory', 'plot_rolling_stats',
+    'plot_comparison', 'plot_stat_comparison', 'plot_stat_comparison_grid',
+    'plot_interaction', 'plot_interaction_grid',
     'PALETTE', 'COLOURS', 'UM_CMAP', 'apply_style', 'get_colour',
 ]

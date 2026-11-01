@@ -71,15 +71,24 @@ class PhaseStats:
 
 
 def infer_animal_id(phase) -> str:
-    """Animal id from the first session that carries one ('unknown' otherwise)."""
+    """Animal id from the first session that carries one ('unknown' otherwise).
+
+    The loader and the synthetic generator both put it in
+    ``session.metadata.animal_id``; ``filter_info['selection']['animal_id']``
+    and a bare ``session.animal_id`` attribute are accepted too.
+    """
     for session in phase:
-        meta = getattr(session, 'filter_info', None) or {}
-        selection = meta.get('selection', {}) if isinstance(meta, dict) else {}
+        meta = getattr(session, 'metadata', None)
+        aid = getattr(meta, 'animal_id', None) if meta is not None else None
+        if aid:
+            return str(aid)
+        info = getattr(session, 'filter_info', None) or {}
+        selection = info.get('selection', {}) if isinstance(info, dict) else {}
         if selection.get('animal_id'):
-            return selection['animal_id']
+            return str(selection['animal_id'])
         aid = getattr(session, 'animal_id', None)
         if aid:
-            return aid
+            return str(aid)
     return 'unknown'
 
 

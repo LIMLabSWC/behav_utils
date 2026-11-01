@@ -16,6 +16,13 @@ Construction:
                                                             # block, e.g. a
                                                             # simulator output
 
+``trial_key`` is an optional int64 identity per row — ``session_idx * 10**6 +
+trial_number`` as built by ``from_sessions`` — that travels through every
+``take``/``valid``/``lag1_pairs`` and every resample, so an external per-trial
+dataset (neural activity, video) can be masked to exactly the trials a
+statistic used. ``from_sequence`` leaves it ``None``. ``trial_key_of`` builds
+the same key from a session index and trial numbers.
+
 Nothing here filters: pass already-filtered sessions.
 """
 
@@ -25,6 +32,14 @@ from dataclasses import dataclass, field
 from typing import Mapping, Sequence
 
 import numpy as np
+
+TRIAL_KEY_BASE = 1_000_000
+
+
+def trial_key_of(session_idx, trial_number) -> np.ndarray:
+    """``session_idx * TRIAL_KEY_BASE + trial_number`` as int64 (broadcasts)."""
+    return (np.asarray(session_idx, dtype=np.int64) * TRIAL_KEY_BASE
+            + np.asarray(trial_number, dtype=np.int64))
 
 
 def _as_float_1d(x, n: int | None = None, name: str = '') -> np.ndarray:
@@ -45,6 +60,7 @@ class TrialArrays:
 
     All fields are 1-D float arrays of equal length. ``choice`` is NaN on
     no-response trials; ``prev_*`` are NaN where there is no usable predecessor.
+    ``trial_key`` (int64, or None) identifies each row across resampling.
     """
 
     choice: np.ndarray
@@ -54,6 +70,7 @@ class TrialArrays:
     prev_stimulus: np.ndarray = field(default=None)        # type: ignore[assignment]
     prev_category: np.ndarray = field(default=None)        # type: ignore[assignment]
     reaction_time: np.ndarray = field(default=None)        # type: ignore[assignment]
+    trial_key: np.ndarray | None = field(default=None)
 
     def __post_init__(self):
         choice = _as_float_1d(self.choice, name='choice')
@@ -72,6 +89,12 @@ class TrialArrays:
                 raise ValueError(f'TrialArrays: {k} has length {len(v)}, expected {n}')
             v.setflags(write=False)
             object.__setattr__(self, k, v)
+        if self.trial_key is not None:
+            key = np.asarray(self.trial_key, dtype=np.int64).reshape(-1)
+            if len(key) != n:
+                raise ValueError(f'TrialArrays: trial_key has length {len(key)}, expected {n}')
+            key.setflags(write=False)
+            object.__setattr__(self, 'trial_key', key)
 
     # ── constructors ────────────────────────────────────────────────────────
 
@@ -86,6 +109,7 @@ class TrialArrays:
             prev_stimulus=pooled.get('prev_stimuli'),
             prev_category=pooled.get('prev_categories'),
             reaction_time=pooled.get('reaction_times'),
+            trial_key=pooled.get('trial_keys'),
         )
 
     @classmethod
@@ -124,6 +148,11 @@ class TrialArrays:
             prev_cat[1:] = cat[:-1]
         return cls(c, s, cat, prev_c, prev_s, prev_cat, reaction_time)
 
+    def with_trial_key(self, trial_key) -> TrialArrays:
+        """Copy with ``trial_key`` set (length must match)."""
+        return TrialArrays(self.choice, self.stimulus, self.category, self.prev_choice,
+                           self.prev_stimulus, self.prev_category, self.reaction_time, trial_key)
+
     # ── views ───────────────────────────────────────────────────────────────
 
     @property
@@ -155,7 +184,20 @@ class TrialArrays:
             self.choice[idx], self.stimulus[idx], self.category[idx],
             self.prev_choice[idx], self.prev_stimulus[idx], self.prev_category[idx],
             self.reaction_time[idx],
+            None if self.trial_key is None else self.trial_key[idx],
         )
+
+    @staticmethod
+    def concat(items: Sequence[TrialArrays]) -> TrialArrays:
+        """Row-concatenate; ``trial_key`` is kept only if every item carries one."""
+        items = list(items)
+        if not items:
+            raise ValueError('TrialArrays.concat: nothing to concatenate')
+        cat = lambda f: np.concatenate([getattr(a, f) for a in items])  # noqa: E731
+        keys = (np.concatenate([a.trial_key for a in items])
+                if all(a.trial_key is not None for a in items) else None)
+        return TrialArrays(cat('choice'), cat('stimulus'), cat('category'), cat('prev_choice'),
+                           cat('prev_stimulus'), cat('prev_category'), cat('reaction_time'), keys)
 
     def lag1_pairs(self) -> TrialArrays:
         """Trials with a responded current choice AND a usable predecessor.

@@ -5,43 +5,29 @@ Composable, preset-driven session filtering for all downstream consumers.
 
 Design:
     SessionFilter is an immutable dataclass describing selection criteria.
-    Named presets can be registered and referenced by string key.
-    All analysis code calls select_sessions() — never rolls its own filtering.
+    Named presets come from the config's ``session_presets`` (looked up on the
+    animal's config first, then in the process-wide registry) or from
+    ``register_preset``. All analysis code calls select_sessions() — never
+    rolls its own filtering.
 
 Filtering order (each step narrows the previous):
     1. Metadata:      stage, distribution
-    2. Session type:   session_type (if set, overrides exclude_opto/exclude_types)
-    3. Index range:    after_session_idx, before_session_idx, session_indices
-    4. Positional:     last_fraction, first_n, last_n
-    5. Quality:        min_accuracy, max_accuracy, min_trials
-    5b. Positional, after quality: last_n_qualifying
-    6. Opto:           exclude_opto      (skipped when session_type is set)
-    7. Types:          exclude_types      (skipped when session_type is set)
-    9. Custom:         custom_filter callable
+    2. Session type:  session_type (if set, exclude_opto / exclude_types are skipped)
+    3. Index range:   after_session_idx, before_session_idx, session_indices
+    4. Positional:    last_fraction, first_n, last_n
+    5. Quality:       min_accuracy, max_accuracy, min_trials
+    6. Positional, after quality: last_n_qualifying
+    7. Exclusions:    exclude_opto, exclude_types   (skipped when session_type is set)
+    8. Custom:        custom_filter callable
 
 Usage:
-    from behav_utils.data.selection import select_sessions, register_preset, SessionFilter
+    from behav_utils import select_sessions, register_preset, SessionFilter
 
-    # Register presets (typically at startup or via config)
-    register_preset('expert_uniform', SessionFilter(
-        stage='task',
-        distribution='Uniform',
-        min_accuracy=0.70,
-        last_fraction=0.50,
-    ))
+    register_preset('expert', SessionFilter(stage='task', min_accuracy=0.70, last_fraction=0.50))
 
-    # Use a preset
-    sessions = select_sessions(animal, 'expert_uniform')
-
-    # Preset with override
-    sessions = select_sessions(animal, 'expert_uniform', min_accuracy=0.80)
-
-    # Ad-hoc (no preset)
-    sessions = select_sessions(animal, stage='task', last_n=5)
-
-    # Convert to FittingData for SBI
-    clean = filter_trials(sessions)
-    fd = fitting_data_from_sessions(clean, animal.animal_id)
+    sessions = select_sessions(animal, 'expert')                       # preset
+    sessions = select_sessions(animal, 'expert', min_accuracy=0.80)    # preset + override
+    sessions = select_sessions(animal, stage='task', last_n=5)         # ad hoc
 """
 
 import warnings
@@ -79,9 +65,9 @@ class SessionFilter:
         distribution: Stimulus distribution (exact match, or list for OR-logic)
         session_type: Session type — 'regular', 'opto', or any project type stamped
                       from config.session_types (e.g. 'sham').
-                      Accepts a string or list.  When set, the exclude_opto /
-                      exclude_opto / exclude_types are ignored (the
-                      caller is explicitly choosing which types to include).
+                      Accepts a string or list. When set, exclude_opto and
+                      exclude_types are ignored (the caller is explicitly
+                      choosing which types to include).
         min_accuracy: Minimum session accuracy (fraction correct)
         max_accuracy: Maximum session accuracy
         last_fraction: Keep only the last X fraction of sessions
@@ -138,10 +124,7 @@ class SessionFilter:
         Apply this filter to an animal's sessions.
 
         Returns:
-            List of matching SessionData, in chronological order.
-
-        Raises:
-            ValueError: If no sessions survive filtering.
+            List of matching SessionData, in chronological order (may be empty).
         """
         # ── 1. Metadata ───────────────────────────────────────────────────
         sessions = animal.get_sessions(
@@ -196,7 +179,7 @@ class SessionFilter:
         if self.min_accuracy is not None or self.max_accuracy is not None:
             filtered = []
             for s in sessions:
-                acc = s.summary()['perf']
+                acc = s.summary().accuracy
                 if self.min_accuracy is not None and acc < self.min_accuracy:
                     continue
                 if self.max_accuracy is not None and acc > self.max_accuracy:
@@ -210,11 +193,11 @@ class SessionFilter:
                 if s.trials.valid_mask.sum() >= self.min_trials
             ]
 
-        # ── 5b. Positional, after quality ─────────────────────────────────
+        # ── 6. Positional, after quality ──────────────────────────────────
         if self.last_n_qualifying is not None:
             sessions = sessions[-self.last_n_qualifying:]
 
-        # ── 6–7. Exclusions (skipped when session_type is set) ──────────
+        # ── 7. Exclusions (skipped when session_type is set) ──────────────
         if self.session_type is None:
             if self.exclude_opto:
                 sessions = [s for s in sessions if not np.any(s.trials.opto_on)]
@@ -222,7 +205,7 @@ class SessionFilter:
                 drop = set(self.exclude_types)
                 sessions = [s for s in sessions if self._resolve_session_type(s) not in drop]
 
-        # ── 9. Custom ─────────────────────────────────────────────────────
+        # ── 8. Custom ─────────────────────────────────────────────────────
         if self.custom_filter is not None:
             sessions = [s for s in sessions if self.custom_filter(s)]
 
@@ -286,7 +269,7 @@ def register_preset(name: str, filt: SessionFilter) -> None:
     Register a named session filter preset.
 
     Args:
-        name: Preset key (e.g. 'expert_uniform')
+        name: Preset key (e.g. 'expert')
         filt: SessionFilter instance
 
     Raises:
@@ -299,19 +282,38 @@ def register_preset(name: str, filt: SessionFilter) -> None:
     _PRESETS[name] = filt
 
 
-def get_preset(name: str) -> SessionFilter:
+def get_preset(name: str, config: Any | None = None) -> SessionFilter:
     """
-    Retrieve a registered preset by name.
+    Retrieve a preset by name: from ``config.session_presets`` if a config is
+    given and defines it, else from the process-wide registry.
 
     Raises:
-        KeyError: If preset not found
+        KeyError: If preset not found in either place.
     """
+    spec = (getattr(config, 'session_presets', None) or {}).get(name) if config is not None else None
+    if isinstance(spec, dict):
+        return preset_from_spec(name, spec)
     if name not in _PRESETS:
         available = ', '.join(sorted(_PRESETS.keys())) or '(none)'
         raise KeyError(
             f"Unknown session preset '{name}'. Available: {available}"
         )
     return _PRESETS[name]
+
+
+def preset_from_spec(name: str, spec: Dict[str, Any]) -> SessionFilter:
+    """Build a SessionFilter from a raw ``session_presets`` entry (YAML dict).
+
+    Unknown fields are ignored with a warning; ``exclude_types`` lists become tuples.
+    """
+    spec = dict(spec)
+    if isinstance(spec.get('exclude_types'), list):
+        spec['exclude_types'] = tuple(spec['exclude_types'])
+    valid_fields = {f.name for f in SessionFilter.__dataclass_fields__.values()}
+    unknown = set(spec) - valid_fields
+    if unknown:
+        warnings.warn(f"Preset '{name}': ignoring unknown fields {sorted(unknown)}", stacklevel=2)
+    return SessionFilter(**{k: v for k, v in spec.items() if k in valid_fields})
 
 
 def list_presets() -> Dict[str, str]:
@@ -329,29 +331,29 @@ def select_sessions(
     Select sessions from an animal using a preset and/or keyword criteria.
 
     Three modes:
-        1. Preset only:    select_sessions(animal, 'expert_uniform')
-        2. Preset + override: select_sessions(animal, 'expert_uniform', min_accuracy=0.80)
-        3. Ad-hoc:         select_sessions(animal, stage='task', last_n=5)
+        1. Preset only:       select_sessions(animal, 'expert')
+        2. Preset + override: select_sessions(animal, 'expert', min_accuracy=0.80)
+        3. Ad-hoc:            select_sessions(animal, stage='task', last_n=5)
+
+    A preset is resolved on the animal's own config (``session_presets`` of the
+    experiment it was loaded with) before the process-wide registry, so two
+    experiments loaded in one session never see each other's presets.
 
     Args:
         animal: AnimalData object
-        preset: Name of a registered preset (optional)
+        preset: Name of a preset (optional)
         **overrides: Any SessionFilter field to set or override
 
     Returns:
         List of SessionData matching the criteria (may be empty)
     """
     if preset is not None:
-        base = get_preset(preset)
-        if overrides:
-            filt = base.with_overrides(**overrides)
-        else:
-            filt = base
+        base = get_preset(preset, config=getattr(animal, '_config', None))
+        filt = base.with_overrides(**overrides) if overrides else base
     else:
         filt = SessionFilter(**overrides)
 
     return filt.apply(animal)
-
 
 
 # =============================================================================
@@ -360,21 +362,17 @@ def select_sessions(
 
 def register_presets_from_config(config_raw: Dict[str, Any]) -> int:
     """
-    Load session presets from a parsed YAML config dict.
+    Register the ``session_presets`` of a parsed YAML config dict in the
+    process-wide registry (``load_experiment`` does this; the config copy on each
+    animal takes priority in ``select_sessions``).
 
-    Expected format under 'session_presets':
+    Expected format::
+
         session_presets:
-          expert_uniform:
+          expert:
             stage: "task"
-            distribution: "uniform"
             min_accuracy: 0.70
             last_fraction: 0.50
-          post_shift_skewed:
-            stage: "task"
-            distribution: "skewed_left"
-
-    Args:
-        config_raw: Parsed YAML dict (the full config)
 
     Returns:
         Number of presets registered
@@ -390,35 +388,10 @@ def register_presets_from_config(config_raw: Dict[str, Any]) -> int:
         if not isinstance(spec, dict):
             warnings.warn(f"Skipping preset '{name}': expected dict, got {type(spec)}", stacklevel=2)
             continue
-
-        # Convert session_indices from YAML list if present
-        if 'session_indices' in spec and isinstance(spec['session_indices'], list):
-            spec['session_indices'] = list(spec['session_indices'])
-
-        if isinstance(spec.get('exclude_types'), list):
-            spec['exclude_types'] = tuple(spec['exclude_types'])
-        # Filter to only valid SessionFilter fields
-        valid_fields = {f.name for f in SessionFilter.__dataclass_fields__.values()}
-        filtered_spec = {k: v for k, v in spec.items() if k in valid_fields}
-
-        unknown = set(spec.keys()) - valid_fields
-        if unknown:
-            warnings.warn(f"Preset '{name}': ignoring unknown fields {unknown}", stacklevel=2)
-
         try:
-            filt = SessionFilter(**filtered_spec)
-            register_preset(name, filt)
+            register_preset(name, preset_from_spec(name, spec))
             count += 1
         except Exception as e:
             warnings.warn(f"Failed to register preset '{name}': {e}", stacklevel=2)
 
     return count
-
-
-# =============================================================================
-# DEFAULT PRESETS
-# =============================================================================
-# Registered on import. Projects can override via config or explicit calls.
-
-# ── Uniform distribution ─────────────────────────────────────────────────
-

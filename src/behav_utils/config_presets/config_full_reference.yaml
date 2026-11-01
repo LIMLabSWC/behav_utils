@@ -19,8 +19,9 @@ file_structure:
 # TASK — experiment parameters
 # ══════════════════════════════════════════════════════════════════════════════
 task:
-  boundary: 0.0                        # Category boundary (stimulus value)
-  stimulus_range: [-1.0, 1.0]          # [min, max] normalised stimulus range
+  boundary: 0.0                        # Category boundary, in the CSV's stimulus units
+  stimulus_range: [-1.0, 1.0]          # [min, max] of the stimulus, in the CSV's units
+  stimulus_scale: linear               # linear | log — the loader maps raw → [-1, 1], boundary at 0
   primary_stimulus: stimulus           # Internal name of the main stimulus column
   primary_choice: choice               # Internal name of the main choice column
   inputs: [stimulus]                   # Model input columns

@@ -1,9 +1,10 @@
 """
 behav_utils.data.ops — Data operations (reshaping the data).
 
-Operations that take SessionData (or raw arrays) and return a reorganised
-view: session selection, trial filtering, pooling, downsampling. The data
-classes themselves live in behav_utils.data.structures.
+Operations that take SessionData and return a reorganised view: session
+selection, trial filtering, pooling, distribution-switch detection. The data
+classes themselves live in behav_utils.data.structures; resampling lives in
+behav_utils.analysis.resampling.
 """
 
 from behav_utils.data.ops.filtering import (

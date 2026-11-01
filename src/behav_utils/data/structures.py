@@ -9,29 +9,18 @@ Hierarchical containers for behavioural data:
             ├── SessionMetadata   Constant within session (stage, contingency, ...)
             └── TrialData         Per-trial arrays (stimulus, choice, correct, ...)
 
-
-Convention — three levels per domain:
-    Low-level:     fit_psychometric(stim, ch)       — raw arrays
-    Session-level: compute_psychometric_curve(arrays) — TrialArrays → PsychometricCurve
-    Plotting:      plot_psychometric_curve(curve)      — dataclass → axes
-
-Plot methods on data classes are thin wrappers that call compute_ then plot_.
+The data classes hold data and nothing else: no filtering (``data/ops``), no
+statistics (``stats``, ``analysis``), no plotting. ``SessionData.get_arrays`` is
+the one convenience wrapper.
 
 Usage:
-    from behav_utils import (
-        load_experiment, select_sessions, filter_trials,
-        TrialArrays, compute_psychometric_curve, compute_update_matrix,
-        plot_psychometric_curve, plot_update_matrix, PALETTE,
-    )
+    from behav_utils import load_experiment, select_sessions, filter_trials, TrialArrays
 
     experiment = load_experiment('config.yaml')
     animal = experiment.get_animal('A05')
-    sessions = select_sessions(animal, preset='expert_uniform')
-    clean = filter_trials(sessions)
-
-    psych = compute_psychometric_curve(TrialArrays.from_sessions(clean), n_bootstrap=200)
-    fig, ax = plt.subplots()
-    plot_psychometric_curve(psych, ax=ax, color=PALETTE[0])
+    sessions = select_sessions(animal, preset='expert')
+    clean = filter_trials(sessions, trial_type='non_opto')
+    arrays = TrialArrays.from_sessions(clean)
 """
 
 import pickle
@@ -83,7 +72,7 @@ class SessionMetadata:
             f"Available: {list(self.fields.keys())}"
         )
 
-    # Common convenience properties
+    # The two fields the library itself reads; everything else via .get() / attribute.
     @property
     def animal_id(self) -> str:
         return self.fields.get('animal_id', '')
@@ -91,18 +80,6 @@ class SessionMetadata:
     @property
     def stage(self) -> str:
         return self.fields.get('stage', '')
-
-    @property
-    def sound_contingency(self) -> str:
-        return self.fields.get('sound_contingency', '')
-
-    @property
-    def stim_range_min(self) -> float:
-        return self.fields.get('stim_range_min', -1.0)
-
-    @property
-    def stim_range_max(self) -> float:
-        return self.fields.get('stim_range_max', 1.0)
 
 
 # =============================================================================
@@ -186,7 +163,11 @@ class TrialData:
     Per-trial arrays for a single session.
 
     Required arrays (always present after loading):
-        stimulus     float   Raw stimulus values (normalised to [-1, 1])
+        stimulus     float   Stimulus on the library's axis: [-1, 1] with the
+                             category boundary at 0 (the loader applies the
+                             config's ``task`` transform; identity for data
+                             already on that axis)
+        stimulus_raw float   The stimulus as read from the CSV
         choice       float   Category-space choice (0=A, 1=B, NaN=no response)
         outcome      str     Trial outcome label from CSV
         correct      bool    Whether choice matched category
@@ -205,10 +186,9 @@ class TrialData:
         extra            Dict[str, np.ndarray]  — unmapped CSV columns
 
     Filtering:
-        Use build_mask() or opto_mask() to create boolean masks,
-        then filter(mask) to create a new TrialData with only those trials.
-        Analysis and plotting functions receive pre-filtered data —
-        they do NOT filter internally.
+        ``behav_utils.data.ops.filtering`` (``build_mask``, ``opto_mask``,
+        ``filter_trial_data``, ``filter_session``, ``filter_trials``) builds new
+        TrialData; nothing here filters.
     """
     # ── Required ────────────────────────────────────────────────────────────
     trial_number: np.ndarray
@@ -219,6 +199,7 @@ class TrialData:
     category: np.ndarray
 
     choice_raw: np.ndarray = field(default_factory=lambda: np.array([]))
+    stimulus_raw: np.ndarray = field(default_factory=lambda: np.array([]))
 
     # ── Optional ────────────────────────────────────────────────────────────
     reaction_time: np.ndarray = field(default_factory=lambda: np.array([]))
@@ -245,6 +226,8 @@ class TrialData:
     def __post_init__(self):
         """Set defaults for empty optional arrays, then build the lag-1 view."""
         n = len(self.stimulus)
+        if len(self.stimulus_raw) == 0:
+            self.stimulus_raw = np.asarray(self.stimulus, dtype=float).copy()
         if len(self.reaction_time) == 0:
             self.reaction_time = np.full(n, np.nan)
         if len(self.abort) == 0:
@@ -334,7 +317,7 @@ class SessionData:
     All data for a single behavioural session.
 
     Attributes:
-        session_id:  Unique identifier (e.g. 'SOUND_CAT_SS14_2026_05_06')
+        session_id:  Unique identifier (the session directory name)
         session_idx: Ordinal index within animal (0-based, chronological)
         date:        Session date
         metadata:    SessionMetadata (stage, contingency, protocol, ...)
@@ -346,9 +329,9 @@ class SessionData:
         filter_info: Metadata about filtering applied (None if unfiltered)
 
     Filtering:
-        session.filter()                              # standard: exclude abort + opto
-        session.filter(session.trials.opto_mask(0))   # custom: opto trials only
-        filtered_session.summary()['perf']             # accuracy on filtered trials
+        filter_session(session)                                      # abort + opto excluded
+        filter_session(session, opto_mask(session.trials, 0))        # opto trials only
+        filter_session(session).summary().accuracy                   # accuracy on what is left
     """
     session_id: str
     session_idx: int
@@ -398,46 +381,62 @@ class SessionData:
 
     def get_arrays(self) -> Dict[str, np.ndarray]:
         """
-        Extract trial arrays for analysis. Aborts are excluded.
-
-        Permitted convenience method — 9+ callers use sess.get_arrays()
-        which reads more naturally than get_arrays(sess.trials).
-        Delegates to filtering.get_arrays.
-
-        No filtering is done here. Filter before calling:
-            filtered = filter_session(sess, mask)
-            arr = filtered.get_arrays()
+        Trial arrays as a dict (a pure projection of ``trials``; nothing is
+        filtered here, aborts included). Delegates to
+        ``behav_utils.data.ops.filtering.get_arrays`` with this session's index
+        so the ``trial_keys`` are global.
         """
         from behav_utils.data.ops.filtering import get_arrays
-        return get_arrays(self.trials)
+        return get_arrays(self.trials, session_idx=self.session_idx)
 
-
-    def summary(self) -> Dict[str, Any]:
-        """Quick summary dict with basic counts and accuracy."""
+    def summary(self) -> 'SessionSummary':
+        """Counts and accuracy over the trials this session currently holds."""
         valid = self.trials.valid_mask
-        n_valid = valid.sum()
+        n_valid = int(valid.sum())
         choices = self.trials.choice[valid].astype(float)
         cats = self.trials.category[valid]
-        result = {
-            'session_id': self.session_id,
-            'session_idx': self.session_idx,
-            'date': self.date,
-            'stage': self.stage,
-            'distribution': self.distribution,
-            'n_trials': self.n_trials,
-            'n_valid': int(n_valid),
-            'n_abort': int(self.trials.abort.sum()),
-            'perf': float((choices == cats).mean()) if n_valid > 0 else np.nan,
-        }
-        if self.filter_info:
-            result['filter'] = self.filter_info['label']
-        return result
+        return SessionSummary(
+            session_id=self.session_id, session_idx=self.session_idx, date=self.date,
+            stage=self.stage, distribution=self.distribution, session_type=self.session_type,
+            n_trials=self.n_trials, n_valid=n_valid, n_abort=int(self.trials.abort.sum()),
+            n_no_response=int(self.trials.no_response.sum()),
+            accuracy=float((choices == cats).mean()) if n_valid > 0 else np.nan,
+            filter=self.filter_info['label'] if self.filter_info else None,
+        )
+
+
+@dataclass(frozen=True)
+class SessionSummary:
+    """Counts and accuracy of one session (``SessionData.summary()``).
+
+    ``accuracy`` is fraction correct over *valid* trials (non-abort, responded):
+    the one definition of session accuracy in the library, used by
+    ``SessionFilter.min_accuracy`` and ``AnimalData.session_table``.
+    """
+    session_id: str
+    session_idx: int
+    date: date
+    stage: str
+    distribution: str
+    session_type: str
+    n_trials: int
+    n_valid: int
+    n_abort: int
+    n_no_response: int
+    accuracy: float
+    filter: str | None = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {f: getattr(self, f) for f in self.__dataclass_fields__}
 
 
 
 # =============================================================================
 # ANIMAL DATA
 # =============================================================================
+
+SESSION_TABLE_COLUMNS = ['session_idx', 'session_id', 'date', 'stage', 'distribution', 'session_type',
+                         'n_trials', 'n_valid', 'n_abort', 'n_no_response', 'accuracy']
 
 @dataclass
 class AnimalData:
@@ -450,10 +449,7 @@ class AnimalData:
     metadata: Dict[str, Any] = field(default_factory=dict)
     _config: Any | None = field(default=None, repr=False)
 
-    # Cache
-    _feature_matrix_cache: pd.DataFrame | None = field(
-        default=None, repr=False
-    )
+    _session_table_cache: pd.DataFrame | None = field(default=None, repr=False)
 
     def __post_init__(self):
         self._compute_time_axes()
@@ -469,7 +465,7 @@ class AnimalData:
 
     def invalidate_cache(self):
         """Call when sessions change."""
-        self._feature_matrix_cache = None
+        self._session_table_cache = None
 
     @property
     def n_sessions(self) -> int:
@@ -487,9 +483,9 @@ class AnimalData:
     @property
     def session_table(self) -> pd.DataFrame:
         """One-row-per-session summary table for selection masks."""
-        if self._feature_matrix_cache is None:
-            self._feature_matrix_cache = self.create_session_table()
-        return self._feature_matrix_cache
+        if getattr(self, '_session_table_cache', None) is None:
+            self._session_table_cache = self.create_session_table()
+        return self._session_table_cache
 
     def create_session_table(self) -> pd.DataFrame:
         """One row per session — a tabular view for building selection masks.
@@ -498,52 +494,20 @@ class AnimalData:
 
             t = animal.session_table
             opto = t[t.session_type == 'opto']                 # sessions with opto trials
-            manipulated = t[t.session_type != 'regular']       # any non-regular type
             good = t[(t.distribution == 'uniform') & (t.accuracy > 0.7)]
 
-        Columns:
-            session_idx, session_id, date, stage, distribution,
-            n_trials, n_valid,
-            session_type — 'regular' | 'opto' (derived from the data) or any
-                type name stamped from ``config.session_types``,
-            accuracy — fraction correct over *valid* (non-aborted) trials.
+        Columns (exactly these; the per-session *statistics* come from
+        ``compute_phase_stats(..., per_session=True)``, not from here):
+            session_idx, session_id, date, stage, distribution, session_type,
+            n_trials, n_valid, n_abort, n_no_response, accuracy
 
-        Notes:
-            - The three session types are mutually exclusive, so they live in a
-                single categorical column rather than three booleans (which could
-                silently disagree).
-            - This is session-level only. It cannot express trial-level opto
-                masks (opto-on vs opto-off *within* a session) — use
-                ``behav_utils.data.ops.filtering.opto_mask`` for that.
-            - 'accuracy' reuses ``SessionData.summary()['perf']`` so there is a
-                single definition of session accuracy across the library.
+        ``session_type`` is 'regular' | 'opto' (derived from the data) or a type
+        stamped from ``config.session_types``. ``accuracy`` is
+        ``SessionData.summary().accuracy``. Trial-level opto masks are not a
+        session property — use ``filter_trials(trial_type=...)``.
         """
-        from behav_utils.data.arrays import TrialArrays
-        from behav_utils.stats import compute_stats, list_stats
-
-        rows = []
-        for sess in self.sessions:
-            summ = sess.summary()
-            stype = getattr(sess, 'session_type', None)
-            if not stype:
-                # Legacy fallback (session predates stored session_type).
-                if sess.trials.opto_on.size > 0 and bool(np.any(sess.trials.opto_on)):
-                    stype = 'opto'
-                else:
-                    stype = 'regular'
-
-            sess_stats = compute_stats(TrialArrays.from_pooled(sess.get_arrays()), list_stats())
-            dict_to_append = {'session_idx':  summ['session_idx'],
-                            'session_id':   summ['session_id'],
-                            'date':         summ['date'],
-                            'stage':        summ['stage'],
-                            'distribution': summ['distribution'],
-                            'n_trials':     summ['n_trials'],
-                            'n_valid':      summ['n_valid'],
-                            'session_type': stype}
-            dict_to_append.update(sess_stats.to_dict())
-            rows.append(dict_to_append)
-        return pd.DataFrame(rows)
+        return pd.DataFrame([s.summary().to_dict() for s in self.sessions],
+                            columns=SESSION_TABLE_COLUMNS)
 
     # ── Filtering ───────────────────────────────────────────────────────────
 
@@ -682,8 +646,17 @@ class ExperimentData:
 
     # ── Persistence ─────────────────────────────────────────────────────────
     def save(self, path: Union[str, Path]) -> None:
+        """Pickle the experiment (configs are dropped — reload from YAML).
+
+        ``metadata['behav_utils_version']`` and ``metadata['config_name']`` are
+        stamped so ``load`` can warn when a snapshot and the library disagree.
+        """
+        from behav_utils import __version__
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
+        self.metadata['behav_utils_version'] = __version__
+        if self.config is not None:
+            self.metadata['config_name'] = getattr(self.config, 'name', None)
         # Don't pickle config objects — reload from YAML
         config_backup = self.config
         self.config = None
@@ -699,5 +672,16 @@ class ExperimentData:
 
     @classmethod
     def load(cls, path: Union[str, Path]) -> 'ExperimentData':
+        """Unpickle; warns if the snapshot was written by another library version."""
+        import warnings
+
+        from behav_utils import __version__
         with open(path, 'rb') as f:
-            return pickle.load(f)
+            exp = pickle.load(f)
+        written = (exp.metadata or {}).get('behav_utils_version')
+        if written != __version__:
+            warnings.warn(
+                f"{Path(path).name}: written by behav_utils {written or '<unknown>'}, "
+                f"loaded by {__version__}; re-run load_experiment if numbers matter.",
+                stacklevel=2)
+        return exp

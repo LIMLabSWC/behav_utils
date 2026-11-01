@@ -50,7 +50,7 @@ class TestSessionFilterBasic:
         """last_n takes the last N and then applies quality; last_n_qualifying applies quality
         first and then takes the last N that passed."""
         regular = [s for s in synthetic_animal.sessions if s.session_type == 'regular']
-        perf = {s.session_idx: s.summary()['perf'] for s in regular}
+        perf = {s.session_idx: s.summary().accuracy for s in regular}
         last = regular[-1].session_idx
         thr = perf[last] - 1e-9                      # a quality rule that drops the last regular session
         passing = [s.session_idx for s in regular if perf[s.session_idx] <= thr]
@@ -261,3 +261,17 @@ class TestBlocksAndSwitches:
         sw = find_switches(seq, min_block_trials=1000)
         assert [(s['from_distribution'], s['to_distribution']) for s in sw] == [('U', 'B'), ('B', 'A')]
         assert sw[0]['n_trials_after'] == 4500 and sw[0]['n_sessions_after'] == 2
+
+
+class TestSessionTableColumns:
+
+    def test_columns_are_exactly_the_documented_set(self, synthetic_animal):
+        from behav_utils.data.structures import SESSION_TABLE_COLUMNS
+        t = synthetic_animal.session_table
+        assert list(t.columns) == SESSION_TABLE_COLUMNS
+        assert len(t) == synthetic_animal.n_sessions
+
+    def test_accuracy_is_summary_accuracy(self, synthetic_animal):
+        t = synthetic_animal.session_table
+        for s in synthetic_animal.sessions:
+            assert t.loc[t.session_idx == s.session_idx, 'accuracy'].item() == s.summary().accuracy

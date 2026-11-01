@@ -26,7 +26,8 @@ def _sess(idx, dist, stype, stage='Full_Task_Cont', noise=0.08, n=300, seed=0):
                    abort=np.zeros(n, bool), opto_on=np.zeros(n, bool))
     return SessionData(session_id=f'{dist}_{stype}_{idx}', session_idx=idx,
                        date=date(2026, 1, 1) + timedelta(days=idx),
-                       metadata=SessionMetadata(fields={'stage': stage, 'distribution': dist}),
+                       metadata=SessionMetadata(fields={'stage': stage, 'distribution': dist,
+                                                        'animal_id': 'SS16'}),
                        trials=tr, session_type=stype)
 
 
@@ -124,3 +125,22 @@ class TestPresetErrors:
         assert f.stage == 'Full_Task_Cont'
         assert f.min_accuracy == pytest.approx(0.7)
         assert 'masking' in f.exclude_types
+
+
+class TestAnimalId:
+    """``PhaseStats.animal`` must come from the data, not default to 'unknown'
+    (regression: group folds collapsed every animal into one unit)."""
+
+    def test_inferred_from_session_metadata(self):
+        from behav_utils import compute_phase_stats, filter_trials
+        from behav_utils.analysis import infer_animal_id
+        phase = filter_trials(select_sessions(_animal(), distribution='Uniform'))
+        assert infer_animal_id(phase) == 'SS16'
+        r = compute_phase_stats(phase, ['accuracy'], per_session=True)
+        assert r.animal == 'SS16'
+        assert set(r.to_rows()['animal']) == {'SS16'} and set(r.sessions['animal']) == {'SS16'}
+
+    def test_explicit_animal_id_wins(self):
+        from behav_utils import compute_phase_stats, filter_trials
+        phase = filter_trials(select_sessions(_animal(), distribution='Uniform'))
+        assert compute_phase_stats(phase, ['accuracy'], animal_id='X').animal == 'X'

@@ -9,9 +9,14 @@ The loader handles:
     - Column mapping and dtype enforcement
     - Value mapping (e.g., {-1: 'left', 0: 'none', 1: 'right'})
     - TimeSpan parsing for session metadata
-    - Category derivation from stimulus + boundary
+    - Stimulus normalisation (``task.normalise_stimulus``: raw → [-1, 1],
+      boundary at 0) and category derivation
     - Robust handling of truncated/malformed CSVs
     - Validation of loaded data against config
+
+Progress goes to the ``behav_utils.data.loading`` logger (INFO); a session or
+animal that fails to load raises unless ``strict=False``, which logs a WARNING
+and skips it instead.
 
 Usage:
     from behav_utils.config import load_config
@@ -24,6 +29,7 @@ Usage:
 """
 
 import glob
+import logging
 import re
 import warnings
 from datetime import date
@@ -47,6 +53,14 @@ from behav_utils.data.structures import (
     SessionMetadata,
     TrialData,
 )
+
+log = logging.getLogger(__name__)
+
+# Fraction of NaN (no-response) choices above which load_session_csv warns:
+# usually a mis-encoded choice column (e.g. go/no-go with the withheld
+# response left blank instead of coded 0).
+NAN_CHOICE_WARN_FRACTION = 0.3
+
 
 # =============================================================================
 # CHOICE ENCODING CONVERSION
@@ -331,8 +345,6 @@ def load_session_csv(
     """
     csv_path = Path(csv_path)
 
-    csv_path = Path(csv_path)
-
     # Read CSV (unless pre-loaded DataFrame provided)
     if df is None:
         try:
@@ -356,8 +368,6 @@ def load_session_csv(
             f"{validation['missing_required']}"
         )
 
-    n_rows = len(df)
-
     # ── Extract session metadata ────────────────────────────────────────────
     metadata = _extract_session_metadata(df, config)
 
@@ -370,12 +380,14 @@ def load_session_csv(
     # Primary stimulus (for category derivation and psychometric analysis)
     primary_stim_name = config.task.primary_stimulus
     if primary_stim_name and primary_stim_name in config.columns:
-        stimulus = _safe_column(df, config.columns[primary_stim_name], n_rows)
-        # Derive category from stimulus + boundary
-        category = (stimulus > config.task.boundary).astype(int)
+        stimulus_raw = np.asarray(_safe_column(df, config.columns[primary_stim_name], n_rows), dtype=float)
+        # Library axis: [-1, 1], boundary at 0 (identity for data already there)
+        stimulus = config.task.normalise_stimulus(stimulus_raw)
+        category = (stimulus > 0.0).astype(int)
         if config.task.category_rule == 'below_boundary':
             category = 1 - category
     else:
+        stimulus_raw = np.full(n_rows, np.nan)
         stimulus = np.full(n_rows, np.nan)
         category = np.full(n_rows, 0, dtype=int)
 
@@ -386,6 +398,12 @@ def load_session_csv(
         choice_category = convert_choice_to_category(
             choice_raw_arr, metadata, config.task.choice_mapping,
         )
+        nan_frac = float(np.mean(np.isnan(choice_category))) if n_rows else 0.0
+        if nan_frac > NAN_CHOICE_WARN_FRACTION:
+            warnings.warn(
+                f"{csv_path.name}: {nan_frac:.0%} of choices are no-response (NaN). If this is a "
+                f"go/no-go task, code the withheld response as 0 via columns.choice.mapping — "
+                f"NaN choices are dropped from every statistic.", stacklevel=2)
     else:
         choice_raw_arr = np.full(n_rows, np.nan)
         choice_category = np.full(n_rows, np.nan)
@@ -459,6 +477,7 @@ def load_session_csv(
     trials = TrialData(
         trial_number=trial_number,
         stimulus=stimulus,
+        stimulus_raw=stimulus_raw,
         choice=choice_category,
         choice_raw=choice_raw_arr,
         outcome=outcome,
@@ -576,11 +595,17 @@ def _read_and_merge_csvs(
 def load_animal(
     animal_dir: Union[str, Path],
     config: ProjectConfig,
+    *,
+    strict: bool = True,
 ) -> AnimalData:
     """
     Load all sessions for one animal from a directory.
 
     Expects: animal_dir / {session_dirs} / {behaviour_file}
+
+    A session that fails to load raises (``strict=True``, default) so a broken
+    file cannot silently shift session indices; ``strict=False`` logs a warning
+    and skips it.
     """
     animal_dir = Path(animal_dir)
     animal_id = animal_dir.name
@@ -624,6 +649,7 @@ def load_animal(
                 # Multiple files: merge then load
                 merged_df = _read_and_merge_csvs(csv_files, config)
                 if merged_df is None or len(merged_df) == 0:
+                    log.warning("%s/%s: no usable CSV rows, skipped", animal_id, sess_dir.name)
                     continue
                 session = load_session_csv(
                     csv_files[0], config,  # path used for metadata only
@@ -633,8 +659,11 @@ def load_animal(
                 )
             sessions.append(session)
         except Exception as e:
-            warnings.warn(f"Failed to load {sess_dir.name}: {e}", stacklevel=2)
+            if strict:
+                raise RuntimeError(f"Failed to load {animal_id}/{sess_dir.name}: {e}") from e
+            log.warning("Failed to load %s/%s: %s (skipped)", animal_id, sess_dir.name, e)
             continue
+    log.info("%s: %d sessions", animal_id, len(sessions))
     return AnimalData(animal_id=animal_id, sessions=sessions)
 
 
@@ -680,6 +709,8 @@ def apply_session_type(experiment, mapping, stype) -> None:
 
 def load_experiment(
     config_or_path: Union[ProjectConfig, str, Path],
+    *,
+    strict: bool = True,
 ) -> ExperimentData:
     """
     Load full experiment from directory structure defined in config.
@@ -687,6 +718,8 @@ def load_experiment(
     Args:
         config_or_path: ProjectConfig object or path to YAML config file.
                         If a path, loads the config automatically.
+        strict:         raise on the first session or animal that fails to load
+                        (default); False logs and skips it.
 
     Returns:
         ExperimentData with all animals loaded
@@ -710,17 +743,17 @@ def load_experiment(
 
     for animal_dir in animal_dirs:
         try:
-            animal = load_animal(animal_dir, config)
-            if animal.n_sessions > 0:
-                experiment.add_animal(animal)
-                animal._config = config
-            else:
-                warnings.warn(
-                    f"Animal {animal.animal_id}: no valid sessions found"
-                , stacklevel=2)
+            animal = load_animal(animal_dir, config, strict=strict)
         except Exception as e:
-            warnings.warn(f"Failed to load animal {animal_dir.name}: {e}", stacklevel=2)
+            if strict:
+                raise
+            log.warning("Failed to load animal %s: %s (skipped)", animal_dir.name, e)
             continue
+        if animal.n_sessions > 0:
+            experiment.add_animal(animal)
+            animal._config = config
+        else:
+            log.warning("Animal %s: no valid sessions found", animal.animal_id)
 
     # Load animal metadata if file exists
     meta_path = data_dir / 'animal_metadata.json'
@@ -742,9 +775,7 @@ def load_experiment(
         from behav_utils.data.ops.selection import register_presets_from_config
         register_presets_from_config({'session_presets': config.session_presets})
 
-    print(
-        f"Loaded {experiment.n_animals} animals, "
-        f"{sum(a.n_sessions for a in experiment.animals.values())} total sessions"
-    )
+    log.info("Loaded %d animals, %d sessions", experiment.n_animals,
+             sum(a.n_sessions for a in experiment.animals.values()))
 
     return experiment

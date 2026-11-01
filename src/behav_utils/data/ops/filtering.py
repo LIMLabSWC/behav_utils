@@ -1,20 +1,19 @@
 """
 Trial-level filtering, extraction, and pooling.
 
-This is the SINGLE source of truth for all trial filtering.
-Data classes (TrialData, SessionData) have thin wrappers that delegate here.
-Analysis and plotting modules do NOT filter — they receive pre-filtered data.
+The single place that decides *which trials*. ``SessionData.get_arrays`` is the
+only wrapper on the data classes; analysis and plotting never filter.
 
 Architecture:
-    loading.py    → raw data from CSV
-    selection.py  → which sessions (session-level)
-    filtering.py  → which trials (trial-level)     ← THIS FILE
-    analysis/     → receives filtered data, computes
-    plotting/     → receives filtered data, draws
+    data/loading.py        → raw data from CSV
+    data/ops/selection.py  → which sessions (session-level)
+    data/ops/filtering.py  → which trials (trial-level)     ← THIS FILE
+    stats/ readouts/ analysis/ → receive filtered data, compute
+    plotting/              → receive results, draw
 
 Pipeline:
-    sessions = select_sessions(animal, preset='expert_uniform')  # session-level
-    clean    = filter_trials(sessions)                           # trial-level
+    sessions = select_sessions(animal, preset='expert')          # session-level
+    clean    = filter_trials(sessions, trial_type='non_opto')    # trial-level
     compute_psychometric_curve(TrialArrays.from_sessions(clean))  # no filtering
 
 Public API:
@@ -24,16 +23,18 @@ Public API:
 
     Session filtering:
         filter_session(session, mask, label)  — new SessionData with filtered trials
-        filter_trials(sessions, mask_fn, ...) — batch filter, returns List[SessionData]
+        filter_trials(sessions, trial_type=…) — batch filter, returns List[SessionData]
 
     Array extraction (from pre-filtered data):
         get_arrays(trials)          — trial arrays as dict
-        pool_arrays(sessions, ...)  — concatenated across sessions
+        pool_arrays(sessions)       — concatenated across sessions
 """
 
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Literal, Union
 
 import numpy as np
+
+from behav_utils.data.arrays import trial_key_of
 
 if TYPE_CHECKING:
     from behav_utils.data.structures import SessionData, TrialData
@@ -96,7 +97,9 @@ def opto_mask(
             1         → first non-abort non-opto trial after each opto run
             2         → second non-abort non-opto after each opto run
             -1        → last non-abort non-opto before each opto run
-            'control' → all non-abort, non-opto trials
+            'control' → all non-abort, non-opto trials (adjacency to an opto
+                        run is NOT considered; combine with ``delta=±k`` masks
+                        to exclude neighbours)
 
     Returns:
         Boolean mask of length trials.n_trials.
@@ -168,7 +171,7 @@ def opto_mask(
 
 # Fields that get sliced when filtering TrialData
 _TRIAL_ARRAY_FIELDS = [
-    'trial_number', 'stimulus', 'choice', 'outcome', 'correct',
+    'trial_number', 'stimulus', 'stimulus_raw', 'choice', 'outcome', 'correct',
     'category', 'choice_raw', 'reaction_time', 'abort', 'opto_on',
     'distribution',
     # lag-1 view — sliced like any other per-trial array so the previous
@@ -202,7 +205,7 @@ def filter_trial_data(
 
     kwargs = {}
     for field_name in _TRIAL_ARRAY_FIELDS:
-        arr = getattr(trials, field_name)
+        arr = getattr(trials, field_name, np.array([]))   # default: field absent on an old pickle
         if isinstance(arr, np.ndarray) and len(arr) == trials.n_trials:
             kwargs[field_name] = arr[mask]
         else:
@@ -277,10 +280,8 @@ def filter_session(
         'fraction_kept': float(mask.sum() / n_original) if n_original > 0 else 0.0,
         'parent_session_id': session.session_id,
     }
-    # The scientific selection, in the reserved key extract_stats reads to
-    # auto-fill its meta columns. Written here so the plain
-    # select_sessions -> filter_trials -> extract_stats path carries its own
-    # labels without the caller passing meta= by hand.
+    # The scientific selection, carried as labels for the tidy frames downstream
+    # (``compute_phase_stats`` / ``compute_rolling_stats`` read them).
     selection = {'session_type': session.session_type}
     if trial_type is not None:
         selection['trial_type'] = trial_type
@@ -314,74 +315,64 @@ def filter_trials(
     """
     Filter trials within each session. Returns new SessionData objects.
 
-    Each session is independently filtered, then filter_session creates a new
-    SessionData with only the selected trials. Sessions with fewer than
-    min_trials surviving trials are dropped.
+    Each session is filtered independently and rebuilt via ``filter_session``;
+    sessions with fewer than ``min_trials`` surviving trials are dropped. Aborts
+    are always dropped by ``trial_type``; no-response trials are kept (their
+    choice is NaN and every statistic ignores them).
 
-    Two ways to specify the mask:
-      - Leave mask_fn=None: the standard exclusion mask is built per session
-        via build_mask, controlled by exclude_abort / exclude_opto. This is the
-        common case (e.g. exclude_opto=False to KEEP opto trials in an opto
-        session, instead of writing a build_mask lambda by hand).
-      - Pass mask_fn: a callable session -> boolean mask. This OVERRIDES the
-        exclude_* flags entirely (they are ignored), for positive selections
-        like opto-only or post-opto trials.
+    Three ways to say which trials, in order of preference:
+
+      1. ``trial_type`` — the named selections (use this):
+           'all'       → every non-abort trial, opto included
+           'non_opto'  → non-abort, laser-off trials
+           'opto'      → laser-on trials only
+           'post_opto' → the first laser-off trial after each opto run
+      2. ``mask_fn`` — ``session -> bool mask`` for anything else
+         (``exclude_abort`` / ``exclude_opto`` are then ignored).
+      3. neither — ``build_mask`` with ``exclude_abort`` / ``exclude_opto``
+         (equivalent to ``trial_type='non_opto'`` by default).
+
+    ``trial_type`` and ``mask_fn`` are exclusive; passing both raises.
 
     Args:
         sessions:      List of SessionData.
         mask_fn:       Callable: session -> boolean mask (length n_trials).
-                       If given, exclude_abort/exclude_opto are ignored.
         min_trials:    Drop sessions below this surviving-trial count.
-        label:         Human-readable description.
-        exclude_abort: (mask_fn=None only) drop aborted trials.
-        exclude_opto:  (mask_fn=None only) drop opto (laser-on) trials. Set
-                       False to keep all valid trials in an opto session.
-        trial_type:    Optional preset for common trial types, overrides mask_fn if given:
-                       'all'       → all non-abort trials (ignore exclude_opto)
-                       'non_opto'  → non-opto non-abort (exclude_opto controls)
-                       'opto'      → opto trials only (positive selection)
-                       'post_opto' → first non-opto after each opto run (positive selection
+        label:         Human-readable description (auto-generated if empty).
+        exclude_abort: (no mask_fn / trial_type only) drop aborted trials.
+        exclude_opto:  (no mask_fn / trial_type only) drop laser-on trials.
+        trial_type:    One of the named selections above.
 
     Returns:
-        List of new SessionData with filter_info set.
+        List of new SessionData with ``filter_info`` set.
 
     Examples:
-        # Using trial_type presets (overrides mask_fn if given):
-        clean = filter_trials(sessions)  # standard clean trials (abort + opto excluded)
-        clean = filter_trials(sessions, trial_type='non_opto')  # same as above
-        allv = filter_trials(sessions_opto, trial_type='all')  # all valid trials in an opto session (keep opto trials)
-        opto = filter_trials(sessions_opto, trial_type='opto')  # opto trials only (positive selection)
-        post = filter_trials(sessions_opto, trial_type='post_opto')  # post-opto trials
+        clean = filter_trials(sessions, trial_type='non_opto')
+        allv  = filter_trials(sessions_opto, trial_type='all')
+        opto  = filter_trials(sessions_opto, trial_type='opto')
+        post  = filter_trials(sessions_opto, trial_type='post_opto')
+        pre   = filter_trials(sessions_opto, mask_fn=lambda s: build_mask(s.trials) & opto_mask(s.trials, -1),
+                              label='pre-opto')
 
-        # Standard clean trials (abort + opto excluded)
-        clean = filter_trials(sessions)
-
-        # All valid trials in an opto session (keep opto trials)
-        allv = filter_trials(sessions_opto, exclude_opto=False)
-
-        # Opto trials only (positive selection -> needs mask_fn)
-        opto = filter_trials(sessions_opto,
-            mask_fn=lambda s: opto_mask(s.trials, delta=0),
-            label='opto trials')
-
-        # Post-opto trials
-        post = filter_trials(sessions_opto,
-            mask_fn=lambda s: opto_mask(s.trials, delta=1),
-            label='post-opto')
+    Raises:
+        ValueError: unknown ``trial_type``, or both ``trial_type`` and ``mask_fn`` given.
     """
     if trial_type is not None:
         if trial_type not in ('all', 'non_opto', 'opto', 'post_opto'):
             raise ValueError(f"Invalid trial_type '{trial_type}'. Choose from: 'all', 'non_opto', 'opto', 'post_opto'.")
+        if mask_fn is not None:
+            raise ValueError("filter_trials: pass either trial_type or mask_fn, not both.")
 
         def mask_fn(s, trial_type=trial_type):
-            base = build_mask(s.trials, exclude_abort=exclude_abort, exclude_opto=(trial_type == 'non_opto'))
+            base = build_mask(s.trials, exclude_abort=True, exclude_opto=(trial_type == 'non_opto'))
             if trial_type == 'opto':
                 return base & opto_mask(s.trials, delta=0)
             if trial_type == 'post_opto':
                 return base & opto_mask(s.trials, delta=1)
             return base
 
-    if mask_fn is None:
+        auto_label = label or f'trial_type={trial_type}'
+    elif mask_fn is None:
         auto_label = label or _standard_mask_label(exclude_abort, exclude_opto)
     else:
         auto_label = label or 'custom'
@@ -416,7 +407,12 @@ def _standard_mask_label(exclude_abort: bool, exclude_opto: bool) -> str:
 # ARRAY EXTRACTION (from pre-filtered data)
 # =============================================================================
 
-def get_arrays(trials: 'TrialData') -> Dict[str, np.ndarray]:
+def _stimulus_raw(trials: 'TrialData') -> np.ndarray:
+    raw = getattr(trials, 'stimulus_raw', None)
+    return raw if raw is not None and len(raw) == trials.n_trials else trials.stimulus
+
+
+def get_arrays(trials: 'TrialData', session_idx: int = 0) -> Dict[str, np.ndarray]:
     """
     Extract trial arrays from a TrialData object — a pure projection.
 
@@ -439,11 +435,15 @@ def get_arrays(trials: 'TrialData') -> Dict[str, np.ndarray]:
             prev_reaction_time np.ndarray
             prev_opto_on    np.ndarray  │
             prev_has_prev   np.ndarray  ┘ bool (per-trial not_blockstart)
+            trial_keys      np.ndarray  int64 identity per row (see ``TrialArrays``);
+                            requires ``session_idx`` (pass it) — else NaN-free
+                            but session-local (session_idx 0)
             n_trials        int
     """
     choices = trials.choice.astype(float)
     return {
         'stimuli': trials.stimulus,
+        'stimuli_raw': _stimulus_raw(trials),
         'categories': trials.category,
         'choices': choices,
         'no_response': np.isnan(choices),
@@ -455,6 +455,7 @@ def get_arrays(trials: 'TrialData') -> Dict[str, np.ndarray]:
         'prev_reaction_time': trials.prev_reaction_time,
         'prev_opto_on': trials.prev_opto_on,
         'prev_has_prev': trials.prev_has_prev,
+        'trial_keys': trial_key_of(session_idx, trials.trial_number),
         'n_trials': len(choices),
     }
 
@@ -480,6 +481,7 @@ def pool_arrays(
             prev_reaction_time, prev_opto_on, prev_has_prev
                 — concatenated carried lag-1 view (prev_has_prev is the pooled
                   not_blockstart)
+            trial_keys     int64 — ``session_idx * 10**6 + trial_number`` per row
             n_trials       int   — total trial count
             n_sessions     int   — number of sessions included
             session_boundaries  list  — cumulative trial counts [0, n1, n1+n2, ...]
@@ -489,15 +491,15 @@ def pool_arrays(
     # has_prev=False at that session's first completed trial), so the pooled
     # prev_has_prev equals not_blockstart with no re-shift across the seam.
     array_keys = [
-        'stimuli', 'categories', 'choices', 'no_response', 'reaction_times',
+        'stimuli', 'stimuli_raw', 'categories', 'choices', 'no_response', 'reaction_times',
         'prev_stimuli', 'prev_choices', 'prev_correct', 'prev_categories',
-        'prev_reaction_time', 'prev_opto_on', 'prev_has_prev',
+        'prev_reaction_time', 'prev_opto_on', 'prev_has_prev', 'trial_keys',
     ]
 
     all_arrays = []
     boundaries = [0]
     for s in sessions:
-        arr = get_arrays(s.trials)
+        arr = get_arrays(s.trials, session_idx=s.session_idx)
         all_arrays.append(arr)
         boundaries.append(boundaries[-1] + arr['n_trials'])
 
@@ -505,6 +507,7 @@ def pool_arrays(
         out = {k: np.array([]) for k in array_keys}
         out['no_response'] = np.array([], dtype=bool)
         out['prev_has_prev'] = np.array([], dtype=bool)
+        out['trial_keys'] = np.array([], dtype=np.int64)
         out.update({'n_trials': 0, 'n_sessions': 0, 'session_boundaries': []})
         return out
 
@@ -512,6 +515,4 @@ def pool_arrays(
     out['n_trials'] = sum(a['n_trials'] for a in all_arrays)
     out['n_sessions'] = len(all_arrays)
     out['session_boundaries'] = boundaries
-    not_blockstart = out['prev_has_prev']  # alias for clarity
-    out['prev_has_prev'] = not_blockstart
     return out

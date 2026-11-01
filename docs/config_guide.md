@@ -7,8 +7,11 @@ behav_utils uses a single YAML config file to map your experiment's data format 
 The config defines four things:
 1. **Where your files are** and how they're organised on disk
 2. **What your CSV columns are called** and how to interpret them
-3. **How your task works** (boundary, stimulus range, choice encoding)
-4. **Default analysis and plotting settings**
+3. **How your task works** (boundary, stimulus range and scale, choice encoding)
+4. **Your vocabulary**: cohorts, session types, session presets, sessions to ignore
+
+It covers two-alternative tasks (2-AFC) and go/no-go alike — see
+[Go/no-go](#gono-go) below for the two things that differ.
 
 ---
 
@@ -120,8 +123,9 @@ Defines the experimental paradigm.
 
 ```yaml
 task:
-  boundary: 0.0                    # Category boundary in stimulus space
-  stimulus_range: [-1.0, 1.0]      # Nominal stimulus range
+  boundary: 0.0                    # Category boundary, in the CSV's stimulus units
+  stimulus_range: [-1.0, 1.0]      # [min, max] of the stimulus, in the CSV's units
+  stimulus_scale: "linear"         # "linear" or "log": the axis the stimulus is mapped on
   n_categories: 2                  # Number of categories (always 2 for now)
   category_rule: "above_boundary"  # How stimulus maps to category
 
@@ -137,6 +141,22 @@ task:
         -1: 1
         1: 0
 ```
+
+#### The stimulus axis
+
+Every statistic, readout and plot in the library works on one normalised stimulus axis: **[-1, 1]
+with the category boundary at 0**. Binning, the psychometric fit bounds, the update-matrix grid and
+the hard/easy split (`|stimulus| < 0.3`) all assume it. The loader maps your raw stimulus onto it
+from `boundary`, `stimulus_range` and `stimulus_scale`, piecewise linearly on the chosen scale:
+
+    boundary        → 0
+    stimulus_range  → -1 and +1 (an asymmetric range still puts the boundary at 0)
+    stimulus_scale  → "log" takes the logarithm first (frequencies, contrasts)
+
+`TrialData.stimulus` is the normalised value; the value as read from the CSV is kept in
+`TrialData.stimulus_raw` (and `stimuli_raw` in `pool_arrays`). With the defaults — range
+`[-1, 1]`, boundary `0`, linear — the mapping is the identity, so data already on that axis is
+untouched. `boundary` must lie strictly inside `stimulus_range`; a log scale needs a positive range.
 
 #### category_rule
 
@@ -451,9 +471,13 @@ session_presets:
     exclude_types: [sham, washout]
 ```
 
-Order of application: stage → distribution → session type / exclusions → accuracy and trial-count
-thresholds → positional cuts. `select_sessions(..., preset=…, **overrides)` lets a call override single
-fields.
+Order of application: stage → distribution → session type → index range → `first_n` / `last_n` /
+`last_fraction` → accuracy and trial-count thresholds → `last_n_qualifying` → exclusions → custom
+filter. `select_sessions(..., preset=…, **overrides)` lets a call override single fields.
+
+A preset is resolved on the animal's own config first (the `ExperimentData` it was loaded with keeps
+its `session_presets`), then in the process-wide registry (`register_preset`). Two experiments loaded
+in one notebook therefore never see each other's presets.
 
 ### sessions_to_ignore
 
@@ -466,6 +490,23 @@ sessions_to_ignore:
 ```
 
 ---
+
+## Go/no-go
+
+Two things differ from a 2-AFC config; everything else is the same.
+
+1. **Code the withheld response as a choice, not as missing.** In go/no-go the "no" response *is*
+   the animal's decision, so it must arrive as `choice = 0` (go = 1). A NaN choice means "no
+   response recorded" and is dropped from every statistic — if the rig leaves the no-go cell blank,
+   map it with `columns.choice.mapping` (e.g. `{"": 0, "lick": 1}`) or `default: 0`. The loader
+   warns when more than 30 % of a session's choices are NaN, which is almost always this mistake.
+2. **Put the go stimuli on the positive side.** `category = 1` is the "B" / positive side, which
+   the SDT statistics treat as the signal; use `category_rule: below_boundary` if go is the low
+   side. With `stimulus_scale: log` for frequencies the psychometric curve is P(go | log f).
+
+`docs/stats_reference.md` has a table of what each statistic then measures (`side_bias` is the go
+rate, `dprime`/`criterion` are the standard hit-vs-false-alarm pair, and so on); the names are not
+changed. `docs/config_examples/go_nogo_minimal.yaml` is a complete, loadable example.
 
 ## Complete examples
 

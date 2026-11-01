@@ -1,32 +1,32 @@
-"""Group-level combination, resampling and testing — pure numeric, no behavioural objects.
+"""Group-level combination, resampling and testing — tidy tables and arrays in, typed results out.
 
-This is the "Tier B" layer: every function takes a tidy stat table (the
-``sessions`` frame from :func:`behav_utils.analysis.phase.compute_phase_stats`) or
+Every function takes a tidy stat table (``compute_phase_stats(...).to_rows()`` or
+``.sessions``, ``Contrast.table()``, accumulated with :func:`collect_rows`) or
 plain arrays, never ``SessionData`` / ``AnimalData``. Each verb does one job, so
 combining / bootstrapping / testing compose freely:
 
-    combine(points, over='session')      # sessions → one value per animal
-    paired_diff(points, by='condition', a='opto', b='nonopto')   # per-animal Δ
-    bootstrap_units(delta_values)        # across-animal CI on the Δ
-    rank_test(het_delta, wt_delta)       # group difference test
-    average_arrays([um for animal in ...])   # element-wise mean curve / UM
+    rows = []
+    for animal in animals:
+        r = compute_phase_stats(phase_of(animal), ['mu', 'accuracy'])
+        rows += collect_rows(r.to_rows().to_dict('records'), animal=animal.animal_id, group=...)
+    compare_groups(rows, groups=('control', 'treated'))   # one rank test per stat
+    combine(points, over='session')                        # sessions → one value per animal
+    paired_diff(points, by='condition', a='on', b='off')   # per-animal Δ
+    bootstrap_units(delta_values)                          # across-animal CI on the Δ
+    rank_test(delta_treated, delta_control)                # group difference test
+    average_arrays([um for animal in ...])                 # element-wise mean curve / UM
 
-Two distinct resampling levels live in this codebase and must not be confused:
-
-  * within-unit (trial-level) — produced at extraction time by
-    ``compute_delta_stat`` bootstrap draws and stored in the ``ci_*_within`` columns /
-    the reps table. Answers "how precise is THIS unit's estimate".
-  * across-unit (cluster) — :func:`bootstrap_units` here, resampling the
-    per-unit ``value`` array. Answers "how much does the effect vary across
-    animals". This is the interval you want for a group claim.
-
-The two are different operations with different answers; this module only does
-the across-unit one.
+Two resampling levels exist and must not be confused: the within-unit
+(trial- or session-level) draws that ``compute_delta_stat`` stores answer "how
+precise is THIS animal's estimate"; the across-unit bootstrap here resamples
+animals and answers "how much does the effect vary across animals". A group
+claim needs the second.
 """
 
 from __future__ import annotations
 
 import warnings
+from dataclasses import dataclass, field
 from math import comb
 from typing import Callable, Dict, Iterable, List, Mapping, Sequence, Union
 
@@ -36,7 +36,94 @@ import pandas as pd
 _NON_KEY = {'value', 'n_trials', 'ci_lo_within', 'ci_hi_within', 'n_units'}
 
 
-__all__ = ['combine', 'paired_diff', 'bootstrap_units', 'rank_test', 'average_arrays', 'min_achievable_p', 'collect_rows', 'compare_groups']
+__all__ = ['combine', 'paired_diff', 'bootstrap_units', 'rank_test', 'average_arrays', 'min_achievable_p',
+           'collect_rows', 'compare_groups',
+           'UnitBootstrap', 'RankTest', 'ArrayAverage', 'GroupComparison']
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Result types
+# ─────────────────────────────────────────────────────────────────────────────
+
+@dataclass(frozen=True)
+class UnitBootstrap:
+    """Across-unit bootstrap of one per-unit value array (``bootstrap_units``)."""
+    point: float
+    lo: float
+    hi: float
+    n: int
+
+    def to_rows(self) -> pd.DataFrame:
+        return pd.DataFrame([{'point': self.point, 'lo': self.lo, 'hi': self.hi, 'n': self.n}])
+
+
+@dataclass(frozen=True)
+class RankTest:
+    """One rank test (``rank_test``): Wilcoxon signed-rank (paired) or Mann-Whitney U.
+
+    ``n`` is the number of pairs used (paired) or ``n_a + n_b`` (unpaired);
+    ``min_p`` the smallest two-sided p this test could return at that size.
+    """
+    test: str
+    paired: bool
+    alternative: str
+    statistic: float
+    p: float
+    n_a: int
+    n_b: int
+    min_p: float
+    group_a: object = None
+    group_b: object = None
+    median_a: float = np.nan
+    median_b: float = np.nan
+    note: str = ''
+
+    @property
+    def n(self) -> int:
+        return self.n_a if self.paired else self.n_a + self.n_b
+
+    def to_rows(self) -> pd.DataFrame:
+        return pd.DataFrame([{f: getattr(self, f) for f in self.__dataclass_fields__}])
+
+    def __repr__(self) -> str:
+        return (f'RankTest({self.test}, n_a={self.n_a}, n_b={self.n_b}, '
+                f'statistic={self.statistic:.3g}, p={self.p:.3g}, min_p={self.min_p:.3g})')
+
+
+@dataclass(frozen=True)
+class ArrayAverage:
+    """Element-wise mean and SEM across a stack (``average_arrays``)."""
+    mean: np.ndarray
+    sem: np.ndarray
+    n: int
+
+
+@dataclass(frozen=True)
+class GroupComparison:
+    """One :class:`RankTest` per stat between two groups of animals (``compare_groups``)."""
+    tests: Dict[str, RankTest] = field(default_factory=dict)
+    group_a: object = None
+    group_b: object = None
+    paired: bool = False
+
+    @property
+    def stats(self) -> List[str]:
+        return list(self.tests)
+
+    def test(self, stat: str) -> RankTest:
+        return self.tests[stat]
+
+    def table(self) -> pd.DataFrame:
+        """One tidy row per stat: ``stat, group_a, group_b, n_a, n_b, median_a, median_b, statistic, p, min_p, note``."""
+        cols = ['stat', 'group_a', 'group_b', 'n_a', 'n_b', 'median_a', 'median_b', 'statistic', 'p', 'min_p', 'note']
+        rows = [{'stat': k, **{c: getattr(t, c) for c in cols[1:]}} for k, t in self.tests.items()]
+        return pd.DataFrame(rows, columns=cols)
+
+    to_rows = table
+
+    def __repr__(self) -> str:
+        return (f'GroupComparison({self.group_a!r} vs {self.group_b!r}, paired={self.paired}, '
+                f'stats={self.stats})')
 
 def combine(
     points: pd.DataFrame,
@@ -174,7 +261,9 @@ def paired_diff(
         raise ValueError("paired_diff: no identifying columns remain to pair on")
 
     sub = points[points[by].isin([a, b])]
-    wide = sub.pivot_table(index=idx, columns=by, values=value, aggfunc='mean')
+    # dropna=False: label columns that are legitimately empty on pooled rows
+    # (``distribution`` None, ``session_type`` '') must not drop the unit.
+    wide = sub.pivot_table(index=idx, columns=by, values=value, aggfunc='mean', dropna=False)
     for lvl in (a, b):
         if lvl not in wide.columns:
             raise ValueError(f"paired_diff: level {lvl!r} not found under {by!r}")
@@ -208,12 +297,12 @@ def bootstrap_units(
     ci: float = 0.95,
     statistic: Callable[[np.ndarray], float] = np.mean,
     seed: int = 0,
-) -> Dict[str, float]:
+) -> UnitBootstrap:
     """Across-unit (cluster) bootstrap CI on a per-unit value array.
 
     Resamples the units (animals) with replacement — this is the interval for a
-    group claim (between-animal variability), NOT the within-unit / trial-level
-    interval stored in ``ci_*_within``.
+    group claim (between-animal variability), NOT the within-unit interval
+    ``compute_delta_stat`` stores per animal.
 
     Args:
         values:    1D per-unit values (e.g. one Δ per animal). NaNs dropped.
@@ -223,17 +312,17 @@ def bootstrap_units(
         seed:      RNG seed.
 
     Returns:
-        ``{'point', 'lo', 'hi', 'n'}``. ``lo``/``hi`` are NaN when n<2.
+        :class:`UnitBootstrap`; ``lo``/``hi`` are NaN when n<2.
     """
     v = np.asarray(list(values), dtype=float)
     v = v[~np.isnan(v)]
-    n = v.size
+    n = int(v.size)
     if n == 0:
-        return {'point': np.nan, 'lo': np.nan, 'hi': np.nan, 'n': 0}
+        return UnitBootstrap(np.nan, np.nan, np.nan, 0)
     point = float(statistic(v))
     if n < 2:
         warnings.warn("bootstrap_units: n<2; CI undefined", stacklevel=2)
-        return {'point': point, 'lo': np.nan, 'hi': np.nan, 'n': n}
+        return UnitBootstrap(point, np.nan, np.nan, n)
 
     rng = np.random.default_rng(seed)
     boot = np.empty(n_boot, dtype=float)
@@ -241,7 +330,7 @@ def bootstrap_units(
         boot[i] = statistic(v[rng.integers(0, n, n)])
     alpha = (1.0 - ci) / 2.0
     lo, hi = np.percentile(boot, [100 * alpha, 100 * (1 - alpha)])
-    return {'point': point, 'lo': float(lo), 'hi': float(hi), 'n': n}
+    return UnitBootstrap(point, float(lo), float(hi), n)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -253,7 +342,7 @@ def rank_test(
     *,
     paired: bool = False,
     alternative: str = 'two-sided',
-) -> Dict[str, Union[float, str, bool, int]]:
+) -> RankTest:
     """Rank test between two per-unit value arrays.
 
     Paired → Wilcoxon signed-rank (requires aligned, equal-length arrays; align
@@ -262,11 +351,11 @@ def rank_test(
     expressed through this one function plus :func:`paired_diff`.
 
     Power is limited at small n; with 6 paired animals a two-sided Wilcoxon p
-    cannot fall below ~0.031. Treat as directional evidence.
+    cannot fall below ~0.031 — ``min_p`` on the result says what the floor is.
 
     Returns:
-        ``{'test', 'statistic', 'p', 'paired', 'alternative', ...}`` with ``n``
-        (paired) or ``n_a``/``n_b`` (unpaired). Degenerate cases return NaN p.
+        :class:`RankTest`. Degenerate cases (no data, all-zero paired
+        differences) have NaN ``p`` and a ``note``.
 
     Raises:
         ValueError: paired with mismatched lengths.
@@ -285,30 +374,39 @@ def rank_test(
         m = ~(np.isnan(a) | np.isnan(b))
         a, b = a[m], b[m]
         n = int(a.size)
-        base = {'test': 'wilcoxon', 'paired': True, 'alternative': alternative, 'n': n}
+        med_a = float(np.median(a)) if n else np.nan
+        med_b = float(np.median(b)) if n else np.nan
+        floor = min_achievable_p('signed_rank', n=n)
         if n < 1 or np.all(a - b == 0):
-            return {**base, 'statistic': np.nan, 'p': np.nan}
+            return RankTest('wilcoxon', True, alternative, np.nan, np.nan, n, n, floor,
+                            median_a=med_a, median_b=med_b, note='no non-zero pairs')
         try:
             stat, p = wilcoxon(a, b, alternative=alternative)
-        except ValueError:
-            stat, p = np.nan, np.nan
-        return {**base, 'statistic': float(stat) if stat == stat else np.nan,
-                'p': float(p) if p == p else np.nan}
+            stat, p = float(stat), float(p)
+        except ValueError as e:
+            return RankTest('wilcoxon', True, alternative, np.nan, np.nan, n, n, floor,
+                            median_a=med_a, median_b=med_b, note=str(e))
+        return RankTest('wilcoxon', True, alternative, stat, p, n, n, floor,
+                        median_a=med_a, median_b=med_b)
 
     a = a[~np.isnan(a)]
     b = b[~np.isnan(b)]
-    base = {'test': 'mannwhitneyu', 'paired': False, 'alternative': alternative,
-            'n_a': int(a.size), 'n_b': int(b.size)}
-    if a.size < 1 or b.size < 1:
-        return {**base, 'statistic': np.nan, 'p': np.nan}
+    n_a, n_b = int(a.size), int(b.size)
+    med_a = float(np.median(a)) if n_a else np.nan
+    med_b = float(np.median(b)) if n_b else np.nan
+    floor = min_achievable_p('rank_sum', n1=n_a, n2=n_b)
+    if n_a < 1 or n_b < 1:
+        return RankTest('mannwhitneyu', False, alternative, np.nan, np.nan, n_a, n_b, floor,
+                        median_a=med_a, median_b=med_b, note='a group is empty')
     stat, p = mannwhitneyu(a, b, alternative=alternative)
-    return {**base, 'statistic': float(stat), 'p': float(p)}
+    return RankTest('mannwhitneyu', False, alternative, float(stat), float(p), n_a, n_b, floor,
+                    median_a=med_a, median_b=med_b)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Average arrays — one element-wise averager for scalars, curves and matrices
 # ─────────────────────────────────────────────────────────────────────────────
-def average_arrays(arrays: Sequence[np.ndarray], *, ddof: int = 1) -> Dict[str, np.ndarray]:
+def average_arrays(arrays: Sequence[np.ndarray], *, ddof: int = 1) -> ArrayAverage:
     """Element-wise mean and SEM across a stack of same-shaped arrays.
 
     Shape-agnostic: scalars, 1D psychometric curves and 2D update matrices all go
@@ -324,7 +422,7 @@ def average_arrays(arrays: Sequence[np.ndarray], *, ddof: int = 1) -> Dict[str, 
         ddof:   delta-DOF for the across-stack std (1 = sample SEM).
 
     Returns:
-        ``{'mean', 'sem', 'n'}``; ``sem`` is all-NaN when n<2.
+        :class:`ArrayAverage`; ``sem`` is all-NaN when n<2.
 
     Raises:
         ValueError: empty input, or shapes that do not match.
@@ -348,7 +446,7 @@ def average_arrays(arrays: Sequence[np.ndarray], *, ddof: int = 1) -> Dict[str, 
         sem = np.full_like(mean, np.nan, dtype=float)
     else:
         sem = np.nanstd(stack, axis=0, ddof=ddof) / np.sqrt(n)
-    return {'mean': mean, 'sem': sem, 'n': n}
+    return ArrayAverage(mean, sem, int(n))
 
 
 def min_achievable_p(test, *, n=None, n1=None, n2=None):
@@ -393,15 +491,19 @@ def collect_rows(
     group_col: str = 'group',
     **labels,
 ) -> List[Dict]:
-    """Stamp an analysis's per-animal scalars with animal, group and labels.
+    """Stamp per-animal scalar rows with the animal, its group and any labels.
 
-    Turns the ``scalars`` list an analysis emits (each ``{stat, value, ...}``)
-    into fully-labelled rows ready to accumulate across animals.
+    Turns the rows an analysis emits for one animal — ``PhaseStats.to_rows()``
+    / ``.sessions``, ``Contrast.table()``, as ``to_dict('records')`` — into
+    fully-labelled rows ready to accumulate across animals.
+
+    ``animal`` always wins: a row's own ``animal`` key is overwritten (a warning
+    is issued if it held a different real id), so a frame built without the id
+    can never collapse several animals into one unit.
 
     Args:
-        scalars:   the ``scalars`` field of a compute_* result — each a mapping
-                   with at least ``stat`` and ``value`` (extra keys carried
-                   through).
+        scalars:   mappings with at least ``stat`` and ``value`` (extra keys
+                   carried through).
         animal:    animal id.
         group:     the group this animal belongs to (cohort, condition, ...).
                    Optional: omit if you will split by explicit name-lists in
@@ -411,15 +513,18 @@ def collect_rows(
                    distribution, contrast, ...).
 
     Returns:
-        A list of dicts, one per scalar, each carrying animal, the group column
-        (when ``group`` is given), the labels, and the scalar's own fields.
+        A list of dicts, one per scalar.
     """
     rows = []
     for entry in scalars:
-        row = {'animal': animal, **labels}
+        entry = dict(entry)
+        own = entry.get('animal')
+        if own not in (None, '', 'unknown', animal):
+            warnings.warn(f"collect_rows: row carries animal={own!r}, stamping {animal!r} over it",
+                          stacklevel=2)
+        row = {**entry, 'animal': animal, **labels}
         if group is not None:
             row[group_col] = group
-        row.update(dict(entry))
         rows.append(row)
     return rows
 
@@ -434,12 +539,12 @@ def compare_groups(
     unit_col: str = 'animal',
     paired: bool = False,
     alternative: str = 'two-sided',
-) -> Dict:
+) -> GroupComparison:
     """Rank-test each stat across animals, split into two groups.
 
-    One test per stat: one value per animal, split into the two groups,
-    rank-test. Animals with a non-finite value for a stat are dropped from that
-    stat's test only.
+    One test per stat: one value per animal (rows of the same animal within a
+    group are averaged), split into the two groups, rank-test. Animals with a
+    non-finite value for a stat are dropped from that stat's test only.
 
     Grouping is specified one of two ways:
 
@@ -459,26 +564,21 @@ def compare_groups(
                      explicitly whenever the reference group matters.
         stats:       which stats to test; default is every stat present.
         value_col, stat_col, unit_col: column names.
-        paired:      Wilcoxon signed-rank instead of Mann-Whitney. Requires the
-                     same animals in both groups aligned by ``unit_col`` — for a
-                     within-animal design only, NOT a between-group split, so
-                     the default is unpaired.
+        paired:      Wilcoxon signed-rank instead of Mann-Whitney. The two
+                     "groups" are then two conditions of the *same* animals: the
+                     values are aligned by ``unit_col`` and an animal missing a
+                     finite value on either side is dropped from that pair.
         alternative: 'two-sided' | 'less' | 'greater'.
 
     Returns:
-        ``{stat: {test, statistic, p, min_p, n_a, n_b, median_a, median_b,
-        group_a, group_b, ...}}``. ``min_p`` is the smallest p obtainable at
-        these group sizes — compare your p against it before reading a null as
-        no effect.
+        :class:`GroupComparison` — ``.test(stat)`` is a :class:`RankTest` whose
+        ``min_p`` is the smallest p obtainable at these group sizes; compare a p
+        against it before reading a null as no effect. ``.table()`` is tidy.
 
     Raises:
-        ValueError: on no rows, fewer than two groups, or a name-list mapping
-            without exactly two groups.
+        ValueError: on no rows, fewer than two groups, a name-list mapping
+            without exactly two groups, or ``paired=True`` with disjoint animals.
     """
-    import pandas as pd
-
-    from behav_utils.analysis.group import min_achievable_p, rank_test
-
     df = rows if isinstance(rows, pd.DataFrame) else pd.DataFrame(list(rows))
     if df.empty:
         raise ValueError("compare_groups: no rows")
@@ -518,43 +618,31 @@ def compare_groups(
             return name_to_group.get(row[unit_col])
         return row[group_col]
 
-    out: Dict[str, Dict] = {}
+    tests: Dict[str, RankTest] = {}
     for stat in stats:
         sub = df[df[stat_col] == stat].copy()
         sub['_grp'] = sub.apply(_group_of, axis=1)
 
-        def _values(label, sub=sub):
+        def _per_unit(label, sub=sub) -> pd.Series:
             rows_g = sub[sub['_grp'] == label]
-            per_unit = rows_g.groupby(unit_col)[value_col].mean()
-            v = per_unit.to_numpy(dtype=float)
-            return v[np.isfinite(v)]
+            return rows_g.groupby(unit_col)[value_col].mean().astype(float)
 
-        a = _values(group_a)
-        b = _values(group_b)
-        if a.size < 1 or b.size < 1:
-            out[stat] = {'test': None, 'p': np.nan, 'min_p': np.nan,
-                         'n_a': int(a.size), 'n_b': int(b.size),
-                         'group_a': group_a, 'group_b': group_b,
-                         'median_a': float(np.median(a)) if a.size else np.nan,
-                         'median_b': float(np.median(b)) if b.size else np.nan,
-                         'note': 'too few animals with a finite value'}
-            continue
+        pa, pb = _per_unit(group_a), _per_unit(group_b)
+        if paired:
+            common = pa.index.intersection(pb.index)
+            if len(common) == 0:
+                raise ValueError(
+                    f"compare_groups(paired=True): {group_a!r} and {group_b!r} share no "
+                    f"{unit_col}; a paired test needs the same animals on both sides")
+            a = pa.reindex(common).to_numpy()
+            b = pb.reindex(common).to_numpy()      # rank_test drops NaN pairs, aligned
+        else:
+            a = pa.to_numpy()
+            a = a[np.isfinite(a)]
+            b = pb.to_numpy()
+            b = b[np.isfinite(b)]
 
-        test = rank_test(a, b, paired=paired, alternative=alternative)
-        try:
-            floor = (min_achievable_p('signed_rank', n=a.size) if paired
-                     else min_achievable_p('rank_sum', n1=a.size, n2=b.size))
-        except Exception:
-            floor = np.nan
-
-        out[stat] = {
-            'test': test.get('test'),
-            'statistic': test.get('statistic'),
-            'p': test.get('p'),
-            'min_p': floor,
-            'n_a': int(a.size), 'n_b': int(b.size),
-            'group_a': group_a, 'group_b': group_b,
-            'median_a': float(np.median(a)), 'median_b': float(np.median(b)),
-            'alternative': alternative, 'paired': paired,
-        }
-    return out
+        t = rank_test(a, b, paired=paired, alternative=alternative)
+        tests[stat] = RankTest(t.test, t.paired, t.alternative, t.statistic, t.p, t.n_a, t.n_b,
+                               t.min_p, group_a, group_b, t.median_a, t.median_b, t.note)
+    return GroupComparison(tests, group_a, group_b, paired)

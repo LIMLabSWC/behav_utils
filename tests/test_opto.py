@@ -129,3 +129,21 @@ class TestOptoContrast:
         so = compute_stats(opto, PSYCHOMETRIC)
         sn = compute_stats(non, PSYCHOMETRIC)
         assert abs(so['mu'] - sn['mu']) < 0.15
+
+
+class TestFilterTrialsGuards:
+
+    def test_trial_type_and_mask_fn_are_exclusive(self):
+        with pytest.raises(ValueError, match='not both'):
+            filter_trials(_sessions(), trial_type='all', mask_fn=lambda s: np.ones(s.n_trials, bool))
+
+    def test_trial_type_always_drops_aborts(self):
+        sess = _sessions()
+        sess[0].trials.abort[:20] = True
+        kept = filter_trials([sess[0]], trial_type='all', exclude_abort=False)[0]
+        assert kept.n_trials == sess[0].n_trials - int(sess[0].trials.abort.sum())
+        assert kept.filter_info['label'] == 'trial_type=all'
+
+    def test_unknown_trial_type_raises(self):
+        with pytest.raises(ValueError):
+            filter_trials(_sessions(), trial_type='laser')

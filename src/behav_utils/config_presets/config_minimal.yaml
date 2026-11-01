@@ -17,8 +17,8 @@ file_structure:
 
 # ── Task parameters ──────────────────────────────────────────────────────────
 task:
-  boundary: 0.0                        # Category boundary
-  stimulus_range: [-1.0, 1.0]
+  boundary: 0.0                        # Category boundary, in the CSV's stimulus units
+  stimulus_range: [-1.0, 1.0]          # with these defaults the stimulus is used as-is
   primary_stimulus: stimulus           # Which column is the main stimulus
   primary_choice: choice               # Which column is the main choice
   inputs: [stimulus]

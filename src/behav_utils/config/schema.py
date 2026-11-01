@@ -25,6 +25,7 @@ from typing import (
     Union,
 )
 
+import numpy as np
 import yaml
 
 # =============================================================================
@@ -130,15 +131,24 @@ class TaskConfig:
         inputs: List of column names that are controlled variables
         outputs: List of column names that are measured variables
 
-    2AFC-specific fields (set these to enable psychometric fitting,
-    summary stats, etc.):
+    Categorisation fields (2-AFC or go/no-go; set these to enable
+    psychometric fitting, summary stats, etc.):
         primary_stimulus: Which input column is THE stimulus for
-                          psychometric fitting. None if not 2AFC.
+                          psychometric fitting. None if there is none.
         primary_choice: Which output column is THE choice.
-        boundary: Category boundary in stimulus space
-        stimulus_range: Nominal stimulus range
+        boundary: Category boundary in *raw* stimulus units
+        stimulus_range: Raw stimulus range (min, max); must bracket ``boundary``
+        stimulus_scale: 'linear' or 'log' — the axis on which the raw stimulus
+                        is mapped to the library's axis (see ``normalise_stimulus``)
         category_rule: How stimulus maps to category
         choice_mapping: How raw choice values convert to categories
+
+    The library computes everything on a normalised stimulus axis: [-1, 1]
+    with the category boundary at 0 (binning, the psychometric fit bounds, the
+    hard/easy split). ``normalise_stimulus`` maps raw values onto it, piecewise
+    linearly on the chosen scale: ``boundary → 0``, ``range[0] → -1``,
+    ``range[1] → +1``. The default (range (-1, 1), boundary 0, linear) is the
+    identity, so data already on that axis is untouched.
     """
     # General: what are the controlled and measured variables?
     inputs: List[str] = field(default_factory=lambda: ['stimulus'])
@@ -151,9 +161,43 @@ class TaskConfig:
     # Category structure (only used if primary_stimulus is set)
     boundary: float = 0.0
     stimulus_range: Tuple[float, float] = (-1.0, 1.0)
+    stimulus_scale: str = "linear"
     n_categories: int = 2
     category_rule: str = "above_boundary"
     choice_mapping: ChoiceMapping = field(default_factory=ChoiceMapping)
+
+    def __post_init__(self):
+        if self.stimulus_scale not in ('linear', 'log'):
+            raise ValueError(f"task.stimulus_scale must be 'linear' or 'log', got {self.stimulus_scale!r}")
+        lo, hi = self.stimulus_range
+        if not lo < self.boundary < hi:
+            raise ValueError(
+                f"task.boundary ({self.boundary}) must lie strictly inside "
+                f"task.stimulus_range ({lo}, {hi})")
+        if self.stimulus_scale == 'log' and lo <= 0:
+            raise ValueError("task.stimulus_scale='log' needs a strictly positive stimulus_range")
+
+    @property
+    def is_identity_transform(self) -> bool:
+        return (self.stimulus_scale == 'linear' and self.boundary == 0.0
+                and tuple(self.stimulus_range) == (-1.0, 1.0))
+
+    def normalise_stimulus(self, raw) -> np.ndarray:
+        """Raw stimulus → [-1, 1] with the boundary at 0 (NaN passes through).
+
+        Piecewise linear on the chosen scale, so an asymmetric range still puts
+        the boundary at 0 and the range ends at ±1. Values outside the range map
+        beyond ±1 (not clipped; the binning clips).
+        """
+        x = np.asarray(raw, dtype=float)
+        if self.is_identity_transform:
+            return x.copy()
+        lo, hi, b = self.stimulus_range[0], self.stimulus_range[1], self.boundary
+        if self.stimulus_scale == 'log':
+            with np.errstate(invalid='ignore', divide='ignore'):
+                x, lo, hi, b = np.log(x), np.log(lo), np.log(hi), np.log(b)
+        out = np.where(x >= b, (x - b) / (hi - b), (x - b) / (b - lo))
+        return out
 
 
 
@@ -401,8 +445,10 @@ def load_config(path: Union[str, Path]) -> ProjectConfig:
     })
 
     # Task
-    task_raw = raw.get('task', {})
+    task_raw = dict(raw.get('task', {}) or {})
     stim_range = task_raw.pop('stimulus_range', [-1.0, 1.0])
+    if len(stim_range) != 2:
+        raise ValueError(f"task.stimulus_range must be [min, max], got {stim_range}")
 
     # Parse choice mapping
     cm_raw = task_raw.pop('choice_mapping', {})
@@ -424,7 +470,7 @@ def load_config(path: Union[str, Path]) -> ProjectConfig:
         outputs=task_raw.get('outputs', []),
         primary_stimulus=task_raw.get('primary_stimulus', None),
         primary_choice=task_raw.get('primary_choice', None),
-        stimulus_range=tuple(stim_range),
+        stimulus_range=(float(stim_range[0]), float(stim_range[1])),
         choice_mapping=choice_mapping,
         **{k: task_raw[k] for k in TaskConfig.__dataclass_fields__
            if k in task_raw and k not in (

@@ -3,10 +3,14 @@ Draw-only plotters for :class:`DeltaStats` and :class:`Interaction`.
 
     r = compute_delta_stat({'non_opto': ctrl, 'opto': opto}, reference='non_opto',
                            units=('trials', 'sessions'))
-    plot_comparison(r, 'opto_vs_non_opto')                 # curves + Δ text
-    plot_stat_comparison(r, ['mu', 'sigma', 'accuracy'])   # point + CI per phase
+    plot_comparison(r, 'opto_vs_non_opto', ax=ax)          # curves + Δ text
+    plot_stat_comparison(r, 'mu', ax=ax)                   # point + CI per phase, one stat
     ix = compute_interaction(r_opto, r_mask, 'opto_vs_non_opto')
-    plot_interaction(ix)                                   # difference of differences
+    plot_interaction(ix, 'mu', ax=ax)                      # difference of differences, one stat
+
+Every ``plot_x(result, stat, ax=None)`` is single-panel and draw-only. The two
+``*_grid`` helpers are the one documented exception to "layout is the caller's":
+they make a grid of axes and call the single-panel plotter once per stat.
 
 Intervals: one per requested unit, offset at the same x. When two units are
 drawn, the trial CI is thin and grey (it ignores session scatter) and the
@@ -140,7 +144,7 @@ def _phase_order(result: DeltaStats, phase_order):
     return [result.reference] + [p for p in result.phases if p != result.reference]
 
 
-def plot_stat_comparison_single(
+def plot_stat_comparison(
     result: DeltaStats,
     stat: str,
     ax: Axes | None = None,
@@ -216,7 +220,7 @@ def plot_stat_comparison_single(
     return ax
 
 
-def plot_stat_comparison(
+def plot_stat_comparison_grid(
     result: DeltaStats,
     stats: Sequence[str] | None = None,
     *,
@@ -228,11 +232,13 @@ def plot_stat_comparison(
     show_p: bool = True,
     units: Sequence[str] | None = None,
 ):
-    """Grid of :func:`plot_stat_comparison_single`, one panel per stat. Returns ``(fig, axes)``."""
+    """Grid of :func:`plot_stat_comparison`, one panel per stat. Returns ``(fig, axes)``.
+
+    Layout helper (the documented exception to single-panel plotters)."""
     from behav_utils.plotting.styles import get_colour
     stats = list(stats) if stats is not None else list(result.names)
     if not stats:
-        raise ValueError('plot_stat_comparison: no stats to plot')
+        raise ValueError('plot_stat_comparison_grid: no stats to plot')
     order = _phase_order(result, phase_order)
     colours = list(palette) if palette else [get_colour(i) for i in range(len(order))]
     ncols = max(1, min(ncols, len(stats)))
@@ -241,7 +247,7 @@ def plot_stat_comparison(
                               figsize=(panel_size[0] * ncols, panel_size[1] * nrows))
     flat = axarr.ravel()
     for ax, stat in zip(flat, stats):
-        plot_stat_comparison_single(result, stat, ax=ax, phase_order=order, palette=colours,
+        plot_stat_comparison(result, stat, ax=ax, phase_order=order, palette=colours,
                                     show_p=show_p, units=units)
     for ax in flat[len(stats):]:
         fig.delaxes(ax)
@@ -253,7 +259,7 @@ def plot_stat_comparison(
 
 # ── interaction ────────────────────────────────────────────────────────────
 
-def plot_interaction_single(
+def plot_interaction(
     interaction: Interaction,
     stat: str,
     ax: Axes | None = None,
@@ -329,7 +335,7 @@ def plot_interaction_single(
     return ax
 
 
-def plot_interaction(
+def plot_interaction_grid(
     interaction: Interaction,
     stats: Sequence[str] | None = None,
     *,
@@ -343,17 +349,19 @@ def plot_interaction(
     colour_interaction: str = '#7f2704',
     units: Sequence[str] | None = None,
 ):
-    """Grid of :func:`plot_interaction_single`, one panel per stat, each with its own y-scale."""
+    """Grid of :func:`plot_interaction`, one panel per stat, each with its own y-scale.
+
+    Layout helper (the documented exception to single-panel plotters)."""
     stats = list(stats) if stats is not None else list(interaction.interaction.index)
     if not stats:
-        raise ValueError('plot_interaction: no stats to plot')
+        raise ValueError('plot_interaction_grid: no stats to plot')
     ncols = max(1, min(ncols, len(stats)))
     nrows = int(np.ceil(len(stats) / ncols))
     fig, axarr = plt.subplots(nrows, ncols, squeeze=False,
                               figsize=(panel_size[0] * ncols, panel_size[1] * nrows))
     flat = axarr.ravel()
     for ax, stat in zip(flat, stats):
-        plot_interaction_single(interaction, stat, ax=ax, show_p=show_p,
+        plot_interaction(interaction, stat, ax=ax, show_p=show_p,
                                 show_components=show_components, colour_a=colour_a,
                                 colour_b=colour_b, colour_interaction=colour_interaction, units=units)
     for ax in flat[len(stats):]:

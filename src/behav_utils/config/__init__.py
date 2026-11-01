@@ -10,10 +10,11 @@ Usage:
     config = load_config('config.yaml')
     experiment = load_experiment(config)
 
-See configs/config_minimal.yaml for a starter template,
-or configs/config_full_reference.yaml for all available options.
+See ``behav_utils/config_presets/config_minimal.yaml`` for a starter template,
+``config_presets/config_full_reference.yaml`` for every option, and
+``docs/config_guide.md`` / ``docs/config_examples/`` for worked examples.
 """
 
-from behav_utils.config.schema import ProjectConfig, load_config
+from behav_utils.config.schema import ProjectConfig, TaskConfig, load_cohorts, load_config
 
-__all__ = ['load_config', 'ProjectConfig']
+__all__ = ['load_config', 'load_cohorts', 'ProjectConfig', 'TaskConfig']

@@ -142,3 +142,14 @@ def test_mu_runs_and_is_finite_on_clean_session():
     mu = res.curve('mu')['value'].to_numpy()
     assert mu.size == _n_windows(300, 50, 10)
     assert np.isfinite(mu).any()
+
+
+def test_plot_rolling_stats_draws_one_line_per_session():
+    import matplotlib
+    matplotlib.use('Agg')
+    from behav_utils.plotting import plot_rolling_stats
+    r = compute_rolling_stats([_session(0, 300), _session(1, 300)], 'accuracy', window=50, step=25)
+    fig, ax = plot_rolling_stats(r, 'accuracy')
+    assert len(ax.lines) == 2
+    with pytest.raises(ValueError):
+        plot_rolling_stats(r, 'mu')

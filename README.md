@@ -1,16 +1,17 @@
 # behav_utils
 
-Analysis library for two-alternative forced-choice (2-AFC) behavioural data.
+Analysis library for two-alternative forced-choice (2-AFC) and go/no-go categorisation data.
 Loads sessions from CSV via a YAML config, selects and filters trials, computes psychometric and
 trial-history statistics with resampling-based uncertainty, and draws the standard figures.
 
-It knows nothing about any particular experiment: distributions, session types and presets all
-come from the config you give it.
+It knows nothing about any particular experiment: stimulus units, distributions, session types and
+presets all come from the config you give it. Every computation runs on one normalised stimulus
+axis ([-1, 1], category boundary at 0) that the loader maps your raw stimulus onto.
 
 ## Install
 
 ```bash
-pip install "behav_utils @ git+https://github.com/serkanshentyurk/behav_utils.git@v0.7.0"   # from its own repo, pinned
+pip install "behav_utils @ git+https://github.com/serkanshentyurk/behav_utils.git@v0.8.0"   # from its own repo, pinned
 pip install -e path/to/behav_utils                                                # editable, for development
 ```
 
@@ -26,7 +27,7 @@ from behav_utils import (load_experiment, select_sessions, filter_trials, TrialA
 experiment = load_experiment('config.yaml')          # {animal_id: AnimalData}
 animal     = experiment.animals['A01']
 
-sessions = select_sessions(animal, preset='expert_uniform')   # presets defined in the config
+sessions = select_sessions(animal, preset='expert')           # presets defined in the config
 phase    = filter_trials(sessions, trial_type='non_opto')     # drops aborts and laser trials
 
 arrays = TrialArrays.from_sessions(phase)                     # one aligned bundle of arrays
@@ -38,7 +39,8 @@ plot_psychometric_curve(curve)                                # one axes, nothin
 
 r = compute_phase_stats(phase, ['accuracy', 'mu'], per_session=True) # pooled Series + tidy per-session frame
 d = compute_delta_stat({'off': phase, 'on': filter_trials(sessions, trial_type='opto')},
-                       ['mu', 'accuracy'], reference='off')  # bootstrap CI + permutation p
+                       ['mu', 'accuracy'], reference='off',
+                       n_permutations=1000)                   # same sessions, per-trial label → permutation p is valid
 d.contrast('on').table()
 ```
 
@@ -46,12 +48,12 @@ d.contrast('on').table()
 
 | package | what | entry points |
 |---|---|---|
-| `behav_utils.config` | YAML schema and loader | `load_config`, `load_cohorts` |
-| `behav_utils.data` | data structures, CSV loading, session selection, trial filtering, synthetic data | `load_experiment`, `select_sessions`, `filter_trials`, `pool_arrays`, `TrialArrays`, `generate_synthetic_animal`, `find_switches` |
+| `behav_utils.config` | YAML schema and loader; the raw → normalised stimulus transform | `load_config`, `load_cohorts`, `TaskConfig.normalise_stimulus` |
+| `behav_utils.data` | data structures, CSV loading, session selection, trial filtering, synthetic data | `load_experiment`, `select_sessions`, `filter_trials`, `pool_arrays`, `TrialArrays` (with `trial_key`), `generate_synthetic_animal`, `find_switches` |
 | `behav_utils.stats` | scalar statistics registry | `compute_stats`, `list_stats`, `PSYCHOMETRIC`, `PSE_DYNAMICS` |
 | `behav_utils.readouts` | array-valued readouts as dataclasses, and the two fit engines on raw arrays (`fit.py`) | `compute_psychometric_curve`, `compute_update_matrix`, `compute_conditional_psychometric`, `compute_binned_curve`, `compute_sd_profile`, `fit_psychometric`, `fit_update_matrix` |
-| `behav_utils.analysis` | phase statistics, contrasts, resampling, rolling, group tests | `compute_phase_stats`, `compute_delta_stat`, `compute_interaction`, `bootstrap_phase_stats`, `permute_phase_difference`, `compute_rolling_stats`, `collect_rows`, `compare_groups` |
-| `behav_utils.plotting` | one draw-only `plot_x` per `compute_x` | `plot_psychometric_curve`, `plot_update_matrix`, `plot_comparison`, `plot_stat_comparison`, `plot_interaction`, `plot_trajectory` |
+| `behav_utils.analysis` | phase statistics, contrasts, resampling, rolling, group tests | `compute_phase_stats`, `compute_delta_stat`, `compute_interaction`, `bootstrap_phase_stats`, `permute_phase_difference`, `compute_rolling_stats`, `collect_rows`, `compare_groups`, `paired_diff`, `bootstrap_units`, `rank_test` |
+| `behav_utils.plotting` | one single-panel, draw-only `plot_x` per result type | `plot_psychometric_curve`, `plot_update_matrix`, `plot_comparison`, `plot_stat_comparison`, `plot_interaction`, `plot_trajectory`, `plot_rolling_stats` (+ `*_grid` layout helpers) |
 
 Worked example, no data needed: [notebooks/example_workflow.ipynb](notebooks/example_workflow.ipynb).
 Full details: [ARCHITECTURE.md](ARCHITECTURE.md) (design and contracts), [docs/config_guide.md](docs/config_guide.md),
@@ -64,12 +66,29 @@ Full details: [ARCHITECTURE.md](ARCHITECTURE.md) (design and contracts), [docs/c
    pre-filtered sessions or a `TrialArrays`; they never select or filter themselves.
 2. **Every compute returns a typed result** — a `pd.Series`/`DataFrame` or a frozen dataclass with `to_rows()`. No nested
    dicts, no shape that depends on a `mode` argument.
-3. **Every plotter is draw-only:** `plot_x(result, ax=None)` takes the matching result and computes nothing.
+3. **Every plotter is draw-only and single-panel:** `plot_x(result, ax=None)` takes the matching result and computes
+   nothing; layout is the caller's. The only exception is the pair of `*_grid` helpers, which lay out one panel per stat.
+
+## Go/no-go
+
+Same library, two config differences: the withheld response is coded as `choice = 0` (not missing),
+and the go stimuli sit on the positive side of the boundary. See *Go/no-go* in
+[docs/config_guide.md](docs/config_guide.md) and the reading table at the top of
+[docs/stats_reference.md](docs/stats_reference.md).
+
+## Neural data
+
+Out of scope here, by design. What the library provides for it is `TrialArrays.trial_key` — an int64
+identity per row (`session_idx * 10**6 + trial_number`) that survives every `take`, `valid` and
+resample — so a per-trial neural tensor keyed the same way can be masked to exactly the trials a
+statistic used. Alignment (sync tables, binning spikes or frames per trial) belongs in the project.
 
 ## Tests
 
 ```bash
-pytest tests -q          # from behav_utils/; no config or data needed
+pytest tests -q                         # from behav_utils/; no config or data needed
+python docs/run_doc_examples.py         # every code block in docs/data_structures_reference.md still runs
+python docs/gen_stats_reference.py      # regenerate docs/stats_reference.md after touching a stat
 ```
 
 ## Versioning

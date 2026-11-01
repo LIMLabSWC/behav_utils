@@ -55,8 +55,29 @@ Array-valued readouts — the psychometric curve, update matrix, conditional psy
 curve, serial-dependence profile — are not statistics; they live in `behav_utils.readouts` as
 dataclasses with one draw-only plotter each.
 
-Stimulus is on the normalised axis with the boundary at 0; category B is the positive side; `choice`
-is 1 for B. "Hard" trials are `|stimulus| < HARD_THRESHOLD` (0.3 by default).
+Stimulus is on the normalised axis ([-1, 1], boundary at 0 — the loader maps raw units onto it, see
+`docs/config_guide.md`); category B is the positive side; `choice` is 1 for B. "Hard" trials are
+`|stimulus| < HARD_THRESHOLD` (0.3 by default).
+
+## Reading the statistics in go/no-go
+
+The names are 2-AFC names; the definitions carry over once the withheld response is coded as
+`choice = 0` and "go" as `choice = 1` with the go stimuli on the positive side of the boundary
+(`category = 1`). What each then measures:
+
+| statistic | 2-AFC meaning | go/no-go meaning |
+|---|---|---|
+| `mu`, `sigma`, `lapse_*` | PSE, slope, floor/ceiling of P(choose B) | go threshold, slope, false-alarm floor / miss ceiling of P(go) |
+| `dprime`, `criterion` | discriminability / bias with B as the signal | the standard hit-vs-false-alarm d′ and c |
+| `accuracy` | fraction correct | hits + correct rejections over all trials |
+| `side_bias` | P(choose B) | go rate |
+| `win_stay`, `lose_shift`, `choice_autocorr`, `perseveration` | repeat / switch of a two-sided choice | repeat / switch of go vs withhold — defined, but "stay" after a correct rejection is a withheld response, not a motor repeat |
+| `recency`, `stimulus_recency`, update matrix | previous-stimulus pull on the current choice | previous-stimulus pull on P(go) |
+| `reaction_time*` | over responded trials | over go trials only |
+
+Nothing is renamed: the project reads the number with the right label. Statistics not in this table
+are either unaffected (`choice_entropy`, `hard/easy_accuracy`, `psychometric_gof`, `pse_dynamics`) or
+need the project to decide whether they mean anything for its task.
 
 '''
 

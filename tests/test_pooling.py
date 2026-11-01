@@ -121,3 +121,41 @@ class TestPoolArrays:
         pooled = pool_arrays(sessions)
         for start in pooled['session_boundaries'][:-1]:  # start index of each session
             assert np.isnan(pooled['prev_stimuli'][start])
+
+
+class TestTrialKey:
+    """``trial_key`` identifies a row across pooling and resampling."""
+
+    def test_keys_are_global_and_unique(self, synthetic_animal):
+        from behav_utils import TrialArrays, filter_trials
+        from behav_utils.data.arrays import trial_key_of
+        clean = filter_trials(synthetic_animal.sessions)
+        arrays = TrialArrays.from_sessions(clean)
+        assert arrays.trial_key is not None and arrays.trial_key.dtype == np.int64
+        assert len(np.unique(arrays.trial_key)) == arrays.n_trials
+        first = clean[0]
+        np.testing.assert_array_equal(arrays.trial_key[:first.n_trials],
+                                      trial_key_of(first.session_idx, first.trials.trial_number))
+
+    def test_keys_travel_with_rows(self, synthetic_animal):
+        from behav_utils import TrialArrays, filter_trials
+        arrays = TrialArrays.from_sessions(filter_trials(synthetic_animal.sessions))
+        idx = np.array([5, 2, 9])
+        np.testing.assert_array_equal(arrays.take(idx).trial_key, arrays.trial_key[idx])
+        np.testing.assert_array_equal(arrays.valid().trial_key, arrays.trial_key[arrays.responded])
+        both = TrialArrays.concat([arrays.take(idx), arrays.take(idx)])
+        assert both.n_trials == 6 and both.trial_key.tolist() == arrays.trial_key[idx].tolist() * 2
+
+    def test_keys_survive_a_resample(self, synthetic_animal):
+        from behav_utils import TrialArrays, filter_trials
+        from behav_utils.analysis.resampling import downsample
+        clean = filter_trials(synthetic_animal.sessions)
+        pooled = set(TrialArrays.from_sessions(clean).trial_key.tolist())
+        drawn = TrialArrays.from_sessions(downsample(clean, 50, rng=np.random.default_rng(0)))
+        assert set(drawn.trial_key.tolist()) <= pooled                 # a draw only re-uses real trials
+
+    def test_from_sequence_has_no_key(self):
+        from behav_utils import TrialArrays
+        a = TrialArrays.from_sequence([0, 1, 1], [-0.5, 0.2, 0.9], [0, 1, 1])
+        assert a.trial_key is None
+        assert a.with_trial_key([7, 8, 9]).trial_key.tolist() == [7, 8, 9]
