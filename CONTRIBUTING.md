@@ -36,3 +36,39 @@ git tag -a vX.Y.Z -m "behav_utils X.Y.Z" && git push origin vX.Y.Z
 `.github/workflows/release.yml` builds the sdist and wheel, checks them, installs the wheel in a clean
 environment and runs the suite, and attaches both files to a GitHub release. Install a release with
 `pip install "behav_utils @ git+https://github.com/serkanshentyurk/behav_utils.git@vX.Y.Z"`.
+
+## Maintenance
+
+The canonical repository is `serkanshentyurk/behav_utils`; versions are tagged and released there.
+Labs and projects that take the library on should **fork** it rather than copy it, keep the fork's
+tags, and either open pull requests upstream (while the maintainer is active) or declare their fork
+the live line in their project README and pin to its tags. Whichever repo a project pins is, for that
+project, the version of record; never pin to a branch.
+
+## Known weak spots (what to look at next)
+
+Honest list of the parts that have had the least validation against real data, in rough order of
+how much a result would move if they are wrong. None is a known bug; each is a place to be sceptical.
+
+- **`stats/dynamics.py` (`pse_dynamics`)** — a within-session exponential-vs-step fit of the PSE
+  trajectory. Loosely identified below ~1000 trials at mouse-like sigma and sensitive to the starting
+  window; `tau` beyond the block length means "did not converge", not a time constant. Report it with
+  session-unit CIs across animals, and treat a single-animal `tau` as descriptive.
+- **`stats/rt.py`** — the reaction-time statistics assume the CSV's RT column means the same thing
+  across sessions and rigs (response onset vs. completion, timeout handling). The library cannot check
+  that; the loader just maps the column. Verify the definition once per dataset before comparing RTs
+  between conditions.
+- **Trial-level bootstrap on history statistics** — `exchangeable=True` on the lag-1 stats is correct
+  because `prev_*` is frozen, but stratification in the draw engine is by the current stimulus bin
+  only. If a condition changes the *previous*-stimulus distribution, the trial bootstrap of `recency`
+  can be narrower than it should be; the session unit is the safe comparison.
+- **`SessionData.distribution`** — the majority label of the trials, which is right for the loader's
+  per-trial distribution column but silently wrong for a session with a mid-session switch; use
+  `find_switches` / `find_blocks` when blocks matter.
+- **Stimulus normalisation at load** (new in 0.8.0) — piecewise-linear around the boundary. An
+  asymmetric raw range therefore has different gain on the two sides of 0, which is what keeps the
+  boundary at 0 and the ends at ±1, but means "0.3 from the boundary" is not the same raw distance on
+  both sides. Fine for binning and the hard/easy split; think before interpreting `sigma` in raw units.
+- **Neural alignment is deliberately absent.** `TrialArrays.trial_key` is the hook; per-trial binning
+  of spikes or frames, sync tables and encoding models belong in the project. If a second project
+  needs the same alignment code, that is the moment to add a sibling package, not before.

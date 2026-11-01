@@ -46,14 +46,14 @@ d.contrast('on').table()
 
 ## What's in it
 
-| package | what | entry points |
-|---|---|---|
-| `behav_utils.config` | YAML schema and loader; the raw → normalised stimulus transform | `load_config`, `load_cohorts`, `TaskConfig.normalise_stimulus` |
-| `behav_utils.data` | data structures, CSV loading, session selection, trial filtering, synthetic data | `load_experiment`, `select_sessions`, `filter_trials`, `pool_arrays`, `TrialArrays` (with `trial_key`), `generate_synthetic_animal`, `find_switches` |
-| `behav_utils.stats` | scalar statistics registry | `compute_stats`, `list_stats`, `PSYCHOMETRIC`, `PSE_DYNAMICS` |
-| `behav_utils.readouts` | array-valued readouts as dataclasses, and the two fit engines on raw arrays (`fit.py`) | `compute_psychometric_curve`, `compute_update_matrix`, `compute_conditional_psychometric`, `compute_binned_curve`, `compute_sd_profile`, `fit_psychometric`, `fit_update_matrix` |
-| `behav_utils.analysis` | phase statistics, contrasts, resampling, rolling, group tests | `compute_phase_stats`, `compute_delta_stat`, `compute_interaction`, `bootstrap_phase_stats`, `permute_phase_difference`, `compute_rolling_stats`, `collect_rows`, `compare_groups`, `paired_diff`, `bootstrap_units`, `rank_test` |
-| `behav_utils.plotting` | one single-panel, draw-only `plot_x` per result type | `plot_psychometric_curve`, `plot_update_matrix`, `plot_comparison`, `plot_stat_comparison`, `plot_interaction`, `plot_trajectory`, `plot_rolling_stats` (+ `*_grid` layout helpers) |
+| package                  | what                                                                                     | entry points                                                                                                                                                                                                                                            |
+| ------------------------ | ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `behav_utils.config`   | YAML schema and loader; the raw → normalised stimulus transform                         | `load_config`, `load_cohorts`, `TaskConfig.normalise_stimulus`                                                                                                                                                                                    |
+| `behav_utils.data`     | data structures, CSV loading, session selection, trial filtering, synthetic data         | `load_experiment`, `select_sessions`, `filter_trials`, `pool_arrays`, `TrialArrays` (with `trial_key`), `generate_synthetic_animal`, `find_switches`                                                                                    |
+| `behav_utils.stats`    | scalar statistics registry                                                               | `compute_stats`, `list_stats`, `PSYCHOMETRIC`, `PSE_DYNAMICS`                                                                                                                                                                                   |
+| `behav_utils.readouts` | array-valued readouts as dataclasses, and the two fit engines on raw arrays (`fit.py`) | `compute_psychometric_curve`, `compute_update_matrix`, `compute_conditional_psychometric`, `compute_binned_curve`, `compute_sd_profile`, `fit_psychometric`, `fit_update_matrix`                                                          |
+| `behav_utils.analysis` | phase statistics, contrasts, resampling, rolling, group tests                            | `compute_phase_stats`, `compute_delta_stat`, `compute_interaction`, `bootstrap_phase_stats`, `permute_phase_difference`, `compute_rolling_stats`, `collect_rows`, `compare_groups`, `paired_diff`, `bootstrap_units`, `rank_test` |
+| `behav_utils.plotting` | one single-panel, draw-only `plot_x` per result type                                   | `plot_psychometric_curve`, `plot_update_matrix`, `plot_comparison`, `plot_stat_comparison`, `plot_interaction`, `plot_trajectory`, `plot_rolling_stats` (+ `*_grid` layout helpers)                                                     |
 
 Worked example, no data needed: [notebooks/example_workflow.ipynb](notebooks/example_workflow.ipynb).
 Full details: [ARCHITECTURE.md](ARCHITECTURE.md) (design and contracts), [docs/config_guide.md](docs/config_guide.md),
@@ -91,7 +91,10 @@ python docs/run_doc_examples.py         # every code block in docs/data_structur
 python docs/gen_stats_reference.py      # regenerate docs/stats_reference.md after touching a stat
 ```
 
-## Versioning
+## Versioning and maintenance
 
 Semantic. `behav_utils.__version__` is stamped into snapshots and result metadata by projects that use it.
-See [CHANGELOG.md](CHANGELOG.md).
+See [CHANGELOG.md](CHANGELOG.md). A `v*` tag builds, tests and publishes a GitHub release automatically.
+
+This repository is the canonical one; projects that take the library on should fork it and pin their
+fork's tags (see *Maintenance* in [CONTRIBUTING.md](CONTRIBUTING.md)).

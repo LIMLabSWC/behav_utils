@@ -21,6 +21,12 @@ jobs:
           python -m venv /tmp/venv && . /tmp/venv/bin/activate
           pip install dist/*.whl pytest
           pytest tests -q
+      - name: Release notes = this version's CHANGELOG section
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          awk -v v="$v" '/^## /{p = ($2 == v)} p' CHANGELOG.md > /tmp/notes.md
+          test -s /tmp/notes.md || echo "See CHANGELOG.md." > /tmp/notes.md
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/*
+          body_path: /tmp/notes.md
