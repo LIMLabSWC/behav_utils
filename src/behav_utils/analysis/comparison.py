@@ -26,6 +26,7 @@ intervals together.
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass, field
 from typing import Dict, Mapping, Sequence, Tuple
 
@@ -35,6 +36,7 @@ import pandas as pd
 from behav_utils.analysis.resampling import (
     bootstrap_phase_stats,
     permute_phase_difference,
+    shared_trial_count,
     summarise_draw_frame,
 )
 from behav_utils.data.arrays import TrialArrays
@@ -271,8 +273,9 @@ def compute_delta_stat(
         n_permutations: label shuffles for a permutation p (default 0 = none).
                         Valid only when the label was randomised per trial, so
                         every non-reference phase must share at least one
-                        session with the reference (same ``session_id``) or
-                        a ValueError is raised. Floor is ``1 / (n_permutations + 1)``.
+                        session with the reference (same ``session_id``) and
+                        none may share a trial with it, or a ValueError is
+                        raised. Floor is ``1 / (n_permutations + 1)``.
         n_bootstrap:    resamples per phase per unit (0 to skip).
         units:          resampling units, e.g. ``('trials', 'sessions')``. The
                         first is the default for ``.boot()`` / ``.table()``. A
@@ -287,7 +290,14 @@ def compute_delta_stat(
     Raises:
         ValueError: fewer than two phases, unknown reference or unit, an
             order-dependent stat requested with trial-level resampling, or a
-            permutation requested between phases that share no session.
+            permutation requested between phases that share no session or
+            that share trials.
+
+    Warns:
+        UserWarning: a phase shares trials with the reference (no permutation
+            requested). One trial class containing another, e.g. ``post_opto``
+            inside ``non_opto``, dilutes the contrast; make the reference
+            disjoint with a ``mask_fn``.
     """
     items = _as_items(phases, labels)
     order = [lab for lab, _ in items]
@@ -302,6 +312,16 @@ def compute_delta_stat(
                     f'compute_delta_stat: n_permutations > 0 but phase {lab!r} shares no session '
                     f'with the reference {reference!r}; a permutation p is only valid when the '
                     f'label was randomised per trial. Use n_permutations=0 and units=("sessions",).')
+    ref_phase = dict(items)[reference]
+    for lab, ph in items:
+        n_shared = shared_trial_count(ph, ref_phase) if lab != reference else 0
+        if n_shared:
+            msg = (f'compute_delta_stat: phase {lab!r} shares {n_shared} trials with the reference '
+                   f'{reference!r}, so the contrast is diluted')
+            if n_permutations > 0:
+                raise ValueError(msg + ' and a permutation cannot give one trial two labels. Make the '
+                                 'phases disjoint (e.g. a mask_fn on the reference).')
+            warnings.warn(msg + '. Make the phases disjoint (e.g. a mask_fn on the reference).', stacklevel=2)
 
     names = tuple(validate_names(names))
     units = tuple(dict.fromkeys(units))

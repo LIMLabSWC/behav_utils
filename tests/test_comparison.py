@@ -32,9 +32,13 @@ from behav_utils.stats import PSYCHOMETRIC, compute_stats
 
 
 # ── synthetic phase builder (criterion shift = mu displacement) ──────────────
-def _phase(n_sessions=2, n=250, shift=0.0, noise=0.15, seed=0, with_aborts=False, shared_ids=True):
+def _phase(n_sessions=2, n=250, shift=0.0, noise=0.15, seed=0, with_aborts=False, shared_ids=True,
+           trial_offset=None):
     """``shared_ids=True`` gives every phase the same session ids — the
-    within-session (per-trial label) design a permutation p is valid for."""
+    within-session (per-trial label) design a permutation p is valid for. Two
+    trial classes cut from one session hold different trials, so each phase
+    numbers its trials from ``trial_offset`` (default ``seed * n``): phases built
+    with different seeds share sessions but no trial."""
     sessions = []
     for i in range(n_sessions):
         rng = np.random.default_rng(seed * 100 + i)
@@ -46,7 +50,8 @@ def _phase(n_sessions=2, n=250, shift=0.0, noise=0.15, seed=0, with_aborts=False
             miss = rng.choice(n, n // 10, replace=False)
             ch[miss] = np.nan
             abort[miss] = True
-        tr = TrialData(trial_number=np.arange(n), stimulus=stim, category=cat,
+        tr = TrialData(trial_number=np.arange(n) + (seed * n if trial_offset is None else trial_offset),
+                       stimulus=stim, category=cat,
                        choice=ch, outcome=(ch == cat).astype(float),
                        correct=(ch == cat), abort=abort, opto_on=np.zeros(n, bool))
         sessions.append(SessionData(
@@ -108,8 +113,10 @@ class TestComputeDeltaStat:
         assert con.perm_p['accuracy'] < 0.05
 
     def test_identical_phases_null_result(self):
+        """The same data in other trials (a copy with its own trial numbers): no difference."""
         base = _phase(seed=7, noise=0.1)
-        r = compute_delta_stat({'ref': base, 'x': base}, ['accuracy'], reference='ref',
+        copy = _phase(seed=7, noise=0.1, trial_offset=10_000)
+        r = compute_delta_stat({'ref': base, 'x': copy}, ['accuracy'], reference='ref',
                                curve=False, **SIG)
         con = r.contrast('x')
         assert abs(con.diff['accuracy']) < 1e-9
@@ -148,6 +155,20 @@ class TestComputeDeltaStat:
     def test_fewer_than_two_phases_raises(self):
         with pytest.raises(ValueError):
             compute_delta_stat({'only': _phase()}, ['accuracy'], reference='only', **FF)
+
+    def test_shared_trials_refused_with_a_permutation(self):
+        """A phase that holds some of the reference's trials (one trial class inside another,
+        e.g. post_opto inside non_opto) cannot be permuted: a trial cannot carry two labels."""
+        ref = _phase(seed=1)
+        part = [ref[0]]
+        with pytest.raises(ValueError, match='shares 250 trials'):
+            compute_delta_stat({'ref': ref, 'x': part}, ['accuracy'], reference='ref', curve=False, **FF)
+
+    def test_shared_trials_warn_without_a_permutation(self):
+        ref = _phase(seed=1)
+        with pytest.warns(UserWarning, match='shares 250 trials'):
+            compute_delta_stat({'ref': ref, 'x': [ref[0]]}, ['accuracy'], reference='ref', curve=False,
+                               n_permutations=0, n_bootstrap=10, seed=1)
 
     def test_reference_not_in_phases_raises(self):
         with pytest.raises(ValueError):
@@ -223,9 +244,17 @@ class TestPermutePhaseDifference:
         assert d.shape == (64, 1)
 
     def test_null_centres_near_zero_for_like_phases(self):
-        d = permute_phase_difference(_phase(seed=1, noise=0.1), _phase(seed=1, noise=0.1),
+        d = permute_phase_difference(_phase(seed=1, noise=0.1), _phase(seed=1, noise=0.1, trial_offset=10_000),
                                      ['accuracy'], n_draws=200, seed=0)['accuracy']
         assert abs(d.mean()) < 0.03
+
+    def test_shared_trials_refused(self):
+        from behav_utils.analysis.resampling import shared_trial_count
+        a = _phase(seed=1)
+        assert shared_trial_count(a, _phase(seed=2)) == 0
+        assert shared_trial_count(a, a[:1]) == 250
+        with pytest.raises(ValueError, match='share 250 trials'):
+            permute_phase_difference(a, a[:1], ['accuracy'], n_draws=8, seed=0)
 
 
 class TestSummariseDraws:

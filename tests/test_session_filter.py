@@ -80,6 +80,15 @@ class TestExcludeTypes:
         masking_count = sum(1 for s in synthetic_animal.sessions if s.session_type == 'masking')
         assert len(result) == len(synthetic_animal.sessions) - masking_count
 
+    def test_exclusions_come_before_the_positional_steps(self, synthetic_opto_animal):
+        """Excluded sessions use up no positions. Uniform sessions: 0-4 regular, 5-6 masking,
+        7-11 opto, 12-13 washout. The last five that are not washout are 7-11; up to 0.8.x the
+        last five (9-13) were taken first and the washout ones then dropped, leaving 9-11."""
+        f = SessionFilter(distribution='Uniform', exclude_types=('washout',), last_n=5)
+        assert [s.session_idx for s in f.apply(synthetic_opto_animal)] == [7, 8, 9, 10, 11]
+        f = SessionFilter(distribution='Uniform', exclude_opto=True, first_n=6)      # masking and opto carry opto trials
+        assert [s.session_idx for s in f.apply(synthetic_opto_animal)] == [0, 1, 2, 3, 4, 12]
+
     def test_describe_mentions_types(self):
         assert 'masking' in SessionFilter(exclude_types=('masking', 'washout')).describe()
 

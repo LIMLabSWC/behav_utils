@@ -471,9 +471,11 @@ session_presets:
     exclude_types: [sham, washout]
 ```
 
-Order of application: stage → distribution → session type → index range → `first_n` / `last_n` /
-`last_fraction` → accuracy and trial-count thresholds → `last_n_qualifying` → exclusions → custom
-filter. `select_sessions(..., preset=…, **overrides)` lets a call override single fields.
+Order of application: stage → distribution → session type, or else the exclusions (`exclude_opto`,
+`exclude_types`) → index range → `first_n` / `last_n` / `last_fraction` → accuracy and trial-count
+thresholds → `last_n_qualifying` → custom filter. The exclusions come before every positional step,
+so `last_n: 5` with `exclude_types` is the last five sessions that are not excluded (up to 0.8.x they
+came after, and excluded sessions used up positions). `select_sessions(..., preset=…, **overrides)` lets a call override single fields.
 
 A preset is resolved on the animal's own config first (the `ExperimentData` it was loaded with keeps
 its `session_presets`), then in the process-wide registry (`register_preset`). Two experiments loaded

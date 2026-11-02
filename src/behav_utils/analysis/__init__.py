@@ -47,6 +47,7 @@ from behav_utils.analysis.resampling import (
     resample_psychometric_curve,
     resample_stat_vectors,
     resample_update_matrix,
+    shared_trial_count,
     summarise_draw_frame,
     summarise_draws,
 )
@@ -66,7 +67,7 @@ __all__ = [
     'PhaseStats', 'compute_phase_stats', 'infer_animal_id',
     'DeltaStats', 'PhaseSummary', 'Contrast', 'Interaction',
     'compute_delta_stat', 'compute_interaction', 'contrast_key',
-    'bootstrap_phase_stats', 'permute_phase_difference', 'summarise_draws',
+    'bootstrap_phase_stats', 'permute_phase_difference', 'shared_trial_count', 'summarise_draws',
     'summarise_draw_frame', 'DrawSummary',
     'downsample', 'calculate_min_n', 'resample_stat_vectors',
     'resample_psychometric_curve', 'resample_update_matrix',

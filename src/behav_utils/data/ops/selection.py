@@ -12,13 +12,18 @@ Design:
 
 Filtering order (each step narrows the previous):
     1. Metadata:      stage, distribution
-    2. Session type:  session_type (if set, exclude_opto / exclude_types are skipped)
+    2. Session type:  session_type (positive selection), or else the exclusions
+                      exclude_opto / exclude_types (negative selection)
     3. Index range:   after_session_idx, before_session_idx, session_indices
     4. Positional:    last_fraction, first_n, last_n
     5. Quality:       min_accuracy, max_accuracy, min_trials
     6. Positional, after quality: last_n_qualifying
-    7. Exclusions:    exclude_opto, exclude_types   (skipped when session_type is set)
-    8. Custom:        custom_filter callable
+    7. Custom:        custom_filter callable
+
+Which sessions count is settled (step 2) before any position is taken (steps 4 and 6), so
+``last_n=5`` with ``exclude_types=('masking',)`` gives the last five sessions that are not masking.
+Up to 0.8.x the exclusions ran after the positional steps: excluded sessions used up positions
+and fewer than N could remain.
 
 Usage:
     from behav_utils import select_sessions, register_preset, SessionFilter
@@ -72,8 +77,9 @@ class SessionFilter:
         max_accuracy: Maximum session accuracy
         last_fraction: Keep only the last X fraction of sessions
                        (applied BEFORE accuracy filtering)
-        first_n: Keep only the first N sessions (after metadata filter)
-        last_n: Keep only the last N sessions (after metadata filter)
+        first_n: Keep only the first N sessions (after the metadata, session-type
+                 and exclusion filters)
+        last_n: Keep only the last N sessions (likewise)
         last_n_qualifying: Keep only the last N sessions that pass the quality
                       filters (applied AFTER min_accuracy / max_accuracy /
                       min_trials, unlike last_n which is applied before them)
@@ -82,10 +88,12 @@ class SessionFilter:
         session_indices: Explicit list of session_idx values to include
         min_trials: Minimum valid (non-abort, responded) trials
         exclude_opto: If True, exclude sessions with opto trials
-                      (ignored when session_type is set)
+                      (ignored when session_type is set). Applied before the
+                      positional steps.
         exclude_types: Session types to drop when session_type is not set,
                       e.g. ('sham', 'washout'). The names are the project's;
                       the library derives only 'regular' and 'opto' from the data.
+                      Applied before the positional steps.
         custom_filter: Callable(SessionData) -> bool for arbitrary filtering
     """
     stage: Union[str, List[str]] | None = None
@@ -132,9 +140,10 @@ class SessionFilter:
             distribution=self.distribution,
         )
 
-        # ── 2. Session type ───────────────────────────────────────────────
-        # When session_type is set, this is a positive selection — the
-        # exclude_opto / exclude_types are ignored.
+        # ── 2. Session type, or the exclusions ────────────────────────────
+        # session_type is a positive selection (exclude_opto / exclude_types are
+        # then ignored); without it the exclusions drop sessions. Either way this
+        # happens before any positional step, so excluded sessions use up no positions.
         if self.session_type is not None:
             if isinstance(self.session_type, str):
                 sessions = [
@@ -147,6 +156,12 @@ class SessionFilter:
                     s for s in sessions
                     if self._resolve_session_type(s) in type_set
                 ]
+        else:
+            if self.exclude_opto:
+                sessions = [s for s in sessions if not np.any(s.trials.opto_on)]
+            if self.exclude_types:
+                drop = set(self.exclude_types)
+                sessions = [s for s in sessions if self._resolve_session_type(s) not in drop]
 
         # ── 3. Index range ────────────────────────────────────────────────
         if self.after_session_idx is not None:
@@ -197,15 +212,7 @@ class SessionFilter:
         if self.last_n_qualifying is not None:
             sessions = sessions[-self.last_n_qualifying:]
 
-        # ── 7. Exclusions (skipped when session_type is set) ──────────────
-        if self.session_type is None:
-            if self.exclude_opto:
-                sessions = [s for s in sessions if not np.any(s.trials.opto_on)]
-            if self.exclude_types:
-                drop = set(self.exclude_types)
-                sessions = [s for s in sessions if self._resolve_session_type(s) not in drop]
-
-        # ── 8. Custom ─────────────────────────────────────────────────────
+        # ── 7. Custom ─────────────────────────────────────────────────────
         if self.custom_filter is not None:
             sessions = [s for s in sessions if self.custom_filter(s)]
 

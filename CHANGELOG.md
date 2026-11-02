@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.9.0 — 2026-11-02
+
+Number-affecting changes are marked ▲.
+
+### Changed ▲
+- `SessionFilter` / `select_sessions`: the exclusions (`exclude_opto`, `exclude_types`) now run before the
+  positional steps (`last_fraction`, `first_n`, `last_n`, `last_n_qualifying`), next to `session_type`.
+  Up to 0.8.x they ran after them, so excluded sessions used up positions and fewer than N could remain
+  (`last_n=5` with `exclude_types=('washout',)` could return three sessions). Only filters that combine
+  an exclusion with a positional step select differently; pin 0.8.0 to reproduce an old selection.
+
+### Changed
+- `compute_delta_stat` raises when a permutation is requested and a phase shares trials with the
+  reference (same `session_id` and `trial_number`: one trial class inside another, e.g. `post_opto`
+  inside `non_opto`), and warns when no permutation is requested. Such a contrast is diluted, and its
+  permutation gave one trial two labels. `permute_phase_difference` refuses shared trials too.
+
+### Added
+- `shared_trial_count(phase_a, phase_b)` (`behav_utils.analysis`): the trials two phases have in common.
+
+### Fixed
+- `pool_arrays([])` gives `session_boundaries == [0]` (was `[]`), consistent with `[0, n1, n1+n2, …]`.
+- CI ran the stats-reference check twice.
+- Tests: the comparison tests built every within-session phase with the same trial numbers, i.e. the
+  same trials; each phase now numbers its trials from `seed * n`, as two trial classes of one session are.
+
 ## 0.8.0 — 2026-10-31
 
 Handover release. Number-affecting defaults are marked ▲.

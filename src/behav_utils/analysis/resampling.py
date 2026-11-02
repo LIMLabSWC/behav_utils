@@ -32,7 +32,8 @@ from behav_utils.readouts._base import X_FIT, _ro, bin_edges
 from behav_utils.stats import compute_stats, is_exchangeable, validate_names
 
 __all__ = ['downsample', 'calculate_min_n', 'resample_psychometric_curve', 'resample_update_matrix', 'resample_stat_vectors',
-           'bootstrap_phase_stats', 'permute_phase_difference', 'DrawSummary', 'summarise_draws', 'summarise_draw_frame']
+           'bootstrap_phase_stats', 'permute_phase_difference', 'shared_trial_count', 'DrawSummary',
+           'summarise_draws', 'summarise_draw_frame']
 
 def _pair_base_mask(pooled) -> np.ndarray:
     """Rows fit_update_matrix counts as post-correct pairs (mirrors its session-path base)."""
@@ -378,6 +379,27 @@ def bootstrap_phase_stats(
     )
 
 
+def _trial_keys(phase) -> set:
+    """``{(session_id, trial_number)}`` for every trial in a phase (a list of sessions)."""
+    keys = set()
+    for s in phase:
+        tn = np.asarray(s.trials.trial_number, dtype=float)
+        keys.update((s.session_id, int(t)) for t in tn[np.isfinite(tn)])
+    return keys
+
+
+def shared_trial_count(phase_a, phase_b) -> int:
+    """How many trials two phases have in common (same ``session_id`` and ``trial_number``).
+
+    Two phases cut from the same sessions overlap when one trial class contains the other, e.g.
+    ``post_opto`` trials are also ``non_opto`` trials. A contrast between overlapping phases is
+    diluted (the shared trials sit on both sides), and a permutation cannot give one trial two
+    labels, so ``permute_phase_difference`` refuses them and ``compute_delta_stat`` refuses or warns.
+    """
+    a = _trial_keys(phase_a)
+    return len(a.intersection(_trial_keys(phase_b))) if a else 0
+
+
 def permute_phase_difference(
     phase_a,
     phase_b,
@@ -412,7 +434,14 @@ def permute_phase_difference(
         ``pd.DataFrame`` (n_draws × names) of differences under the null. A
         shuffle that produced an unfittable split is a NaN row; ``summarise_draws``
         drops NaNs rather than counting them as zero.
+
+    Raises:
+        ValueError: the phases share trials (``shared_trial_count`` > 0).
     """
+    n_shared = shared_trial_count(phase_a, phase_b)
+    if n_shared:
+        raise ValueError(f'permute_phase_difference: the phases share {n_shared} trials; a shuffle cannot '
+                         f'give one trial two labels. Make them disjoint first.')
     names = validate_names(names)
     out = pd.DataFrame(np.full((n_draws, len(names)), np.nan), columns=list(names))
     if not names:

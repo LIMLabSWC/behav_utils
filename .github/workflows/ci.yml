@@ -23,5 +23,3 @@ jobs:
         run: python docs/run_doc_examples.py
       - name: The generated stats reference is current
         run: python docs/gen_stats_reference.py && git diff --exit-code docs/stats_reference.md
-      - name: stats_reference.md is up to date
-        run: python docs/gen_stats_reference.py && git diff --exit-code docs/stats_reference.md

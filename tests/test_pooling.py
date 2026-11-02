@@ -159,3 +159,10 @@ class TestTrialKey:
         a = TrialArrays.from_sequence([0, 1, 1], [-0.5, 0.2, 0.9], [0, 1, 1])
         assert a.trial_key is None
         assert a.with_trial_key([7, 8, 9]).trial_key.tolist() == [7, 8, 9]
+
+
+def test_no_sessions_gives_one_boundary():
+    """Boundaries are [0, n1, n1+n2, ...], so no sessions is [0] (n_sessions = len - 1 = 0)."""
+    from behav_utils.data.ops.filtering import pool_arrays
+    pooled = pool_arrays([])
+    assert pooled['session_boundaries'] == [0] and pooled['n_sessions'] == 0 and pooled['n_trials'] == 0

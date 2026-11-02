@@ -508,7 +508,7 @@ def pool_arrays(
         out['no_response'] = np.array([], dtype=bool)
         out['prev_has_prev'] = np.array([], dtype=bool)
         out['trial_keys'] = np.array([], dtype=np.int64)
-        out.update({'n_trials': 0, 'n_sessions': 0, 'session_boundaries': []})
+        out.update({'n_trials': 0, 'n_sessions': 0, 'session_boundaries': [0]})
         return out
 
     out = {k: np.concatenate([a[k] for a in all_arrays]) for k in array_keys}

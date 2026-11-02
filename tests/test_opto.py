@@ -147,3 +147,20 @@ class TestFilterTrialsGuards:
     def test_unknown_trial_type_raises(self):
         with pytest.raises(ValueError):
             filter_trials(_sessions(), trial_type='laser')
+
+
+class TestOverlappingTrialClasses:
+    """post_opto trials are also non_opto trials, so the two phases overlap; opto and non_opto do not."""
+
+    def test_post_opto_sits_inside_non_opto(self):
+        from behav_utils.analysis.resampling import shared_trial_count
+        sess = _sessions()
+        non = filter_trials(sess, trial_type='non_opto', exclude_opto=False)
+        post = filter_trials(sess, trial_type='post_opto', exclude_opto=False)
+        opto = filter_trials(sess, trial_type='opto', exclude_opto=False)
+        n_post = sum(s.trials.n_trials for s in post)
+        assert n_post > 0 and shared_trial_count(post, non) == n_post
+        assert shared_trial_count(opto, non) == 0
+        with pytest.raises(ValueError, match='shares'):
+            compute_delta_stat({'non_opto': non, 'post_opto': post}, ['accuracy'], reference='non_opto',
+                               curve=False, n_permutations=20, n_bootstrap=0, seed=1)

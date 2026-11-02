@@ -11,7 +11,7 @@ axis ([-1, 1], category boundary at 0) that the loader maps your raw stimulus on
 ## Install
 
 ```bash
-pip install "behav_utils @ git+https://github.com/serkanshentyurk/behav_utils.git@v0.8.0"   # from its own repo, pinned
+pip install "behav_utils @ git+https://github.com/serkanshentyurk/behav_utils.git@v0.9.0"   # from its own repo, pinned
 pip install -e path/to/behav_utils                                                # editable, for development
 ```
 
