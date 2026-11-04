@@ -10,9 +10,16 @@ axis ([-1, 1], category boundary at 0) that the loader maps your raw stimulus on
 
 ## Install
 
+A pinned release:
+
 ```bash
-pip install "behav_utils @ git+https://github.com/serkanshentyurk/behav_utils.git@v0.9.0"   # from its own repo, pinned
-pip install -e path/to/behav_utils                                                # editable, for development
+pip install "behav_utils @ git+https://github.com/serkanshentyurk/behav_utils.git@v0.9.0"
+```
+
+Or your own checkout, editable, to work on the library:
+
+```bash
+pip install -e <path to behav_utils>
 ```
 
 Requires Python ≥ 3.10; numpy, pandas, scipy, matplotlib, pyyaml.
@@ -85,10 +92,18 @@ statistic used. Alignment (sync tables, binning spikes or frames per trial) belo
 
 ## Tests
 
+From the repository folder; no config or data needed:
+
 ```bash
-pytest tests -q                         # from behav_utils/; no config or data needed
-python docs/run_doc_examples.py         # every code block in docs/data_structures_reference.md still runs
-python docs/gen_stats_reference.py      # regenerate docs/stats_reference.md after touching a stat
+pytest tests -q
+python docs/run_doc_examples.py
+```
+
+The second checks that every code block in `docs/data_structures_reference.md` still runs. After changing
+a statistic, regenerate its reference page:
+
+```bash
+python docs/gen_stats_reference.py
 ```
 
 ## Versioning and maintenance

@@ -67,8 +67,11 @@ tests/                              conftest (synthetic fixtures, test-local pre
   and keeps no-response trials). `trial_type` and `mask_fn` are exclusive.
 - `compute_phase_stats(...).pooled` is a real pooled fit; never average per-session values to get it.
 - Permutation p is only valid when the label was randomised per trial. `compute_delta_stat` has
-  `n_permutations=0` by default and raises if asked for one between phases that share no session;
-  session-level conditions get bootstrap intervals with `units=('sessions',)`.
+  `n_permutations=0` by default and raises if asked for one between phases that share no session, or
+  between phases that share trials (one trial class inside another, e.g. `post_opto` inside `non_opto`;
+  `shared_trial_count`). Session-level conditions get bootstrap intervals with `units=('sessions',)`.
+- `select_sessions` applies `exclude_opto` / `exclude_types` before `first_n` / `last_n` / `last_fraction`
+  (since 0.9.0): `last_n=5` with an exclusion is the last five sessions that are not excluded.
 - `PhaseStats.animal` comes from `session.metadata.animal_id`; `collect_rows(animal=...)` overrides it.
   Six animals showing up as one unit in `compare_groups` means the id never reached the rows.
 - `AnimalData.session_table` is counts + accuracy for picking sessions; per-session statistics come

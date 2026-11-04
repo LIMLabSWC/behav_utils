@@ -5,26 +5,25 @@
 Number-affecting changes are marked ▲.
 
 ### Changed ▲
-- `SessionFilter` / `select_sessions`: the exclusions (`exclude_opto`, `exclude_types`) now run before the
-  positional steps (`last_fraction`, `first_n`, `last_n`, `last_n_qualifying`), next to `session_type`.
-  Up to 0.8.x they ran after them, so excluded sessions used up positions and fewer than N could remain
-  (`last_n=5` with `exclude_types=('washout',)` could return three sessions). Only filters that combine
-  an exclusion with a positional step select differently; pin 0.8.0 to reproduce an old selection.
+- `select_sessions` / `SessionFilter`: `exclude_opto` and `exclude_types` now apply before `first_n`, `last_n`,
+  `last_fraction` and `last_n_qualifying`. Before, excluded sessions still took up positions, so `last_n=5`
+  could return fewer than 5.
 
 ### Changed
-- `compute_delta_stat` raises when a permutation is requested and a phase shares trials with the
-  reference (same `session_id` and `trial_number`: one trial class inside another, e.g. `post_opto`
-  inside `non_opto`), and warns when no permutation is requested. Such a contrast is diluted, and its
-  permutation gave one trial two labels. `permute_phase_difference` refuses shared trials too.
+- `compute_delta_stat` raises if a permutation is requested and a phase shares trials with the reference
+  (e.g. `post_opto` inside `non_opto`); without a permutation it warns. `permute_phase_difference` raises too.
 
 ### Added
-- `shared_trial_count(phase_a, phase_b)` (`behav_utils.analysis`): the trials two phases have in common.
+- `shared_trial_count(phase_a, phase_b)`: how many trials two phases share.
 
 ### Fixed
-- `pool_arrays([])` gives `session_boundaries == [0]` (was `[]`), consistent with `[0, n1, n1+n2, …]`.
+- `pool_arrays([])` returns `session_boundaries == [0]` (was `[]`).
 - CI ran the stats-reference check twice.
-- Tests: the comparison tests built every within-session phase with the same trial numbers, i.e. the
-  same trials; each phase now numbers its trials from `seed * n`, as two trial classes of one session are.
+- Tests: the comparison tests gave every phase the same trial numbers; each phase now has its own.
+
+### Docs
+- Install and test commands without inline comments; LLM_CONTEXT notes the selection order and the
+  shared-trial guard.
 
 ## 0.8.0 — 2026-10-31
 
