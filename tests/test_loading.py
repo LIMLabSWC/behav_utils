@@ -337,6 +337,19 @@ class TestLoadAnimalAndExperiment:
         assert animal.n_sessions == 2
         assert {s.date for s in animal.sessions} == {date(2024, 3, 15), date(2024, 3, 16)}
 
+    def test_empty_files_are_skipped_as_if_absent(self, tmp_path):
+        """A run stopped before writing anything leaves an empty file. Next to a real one it is ignored
+        (the session loads from the real file); on its own the session is skipped, even when strict."""
+        a1 = self._build_tree(tmp_path)
+        (a1 / 'Sess_2024_03_15' / 'trial_summary_0.csv').write_text('')
+        (a1 / 'Sess_2024_03_17').mkdir()
+        (a1 / 'Sess_2024_03_17' / 'trial_summary.csv').write_text('')
+        cfg = _minimal_config(data_dir=tmp_path, drop_last_row=False)
+        animal = load_animal(a1, cfg)
+        assert animal.n_sessions == 2
+        assert {s.date for s in animal.sessions} == {date(2024, 3, 15), date(2024, 3, 16)}
+        assert all(s.trials.n_trials == 11 for s in animal.sessions)
+
     def test_load_experiment_merges_metadata_and_masks(self, tmp_path):
         data = tmp_path / 'data'
         self._build_tree(data, with_opto=True)

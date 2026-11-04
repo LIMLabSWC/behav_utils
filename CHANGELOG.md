@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.1 — 2026-11-04
+
+### Fixed
+- `load_animal` skips empty CSV files (nothing in them, not even a header: a run stopped before writing
+  anything) with a warning, as if absent; a session with only empty files is skipped. In a session with
+  several files an empty one raised `EmptyDataError` and, under `strict=True`, stopped the whole load.
+  `is_empty_csv(path)` is the check, for projects that re-read the CSVs.
+
 ## 0.9.0 — 2026-11-02
 
 Number-affecting changes are marked ▲.

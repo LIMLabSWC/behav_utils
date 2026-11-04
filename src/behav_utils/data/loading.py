@@ -592,6 +592,18 @@ def _read_and_merge_csvs(
 
     return merged
 
+def is_empty_csv(path: Union[str, Path]) -> bool:
+    """True for a file with nothing in it, not even a header (a run stopped before writing anything).
+    The loader skips such files; projects that re-read the CSVs should do the same."""
+    try:
+        pd.read_csv(path, nrows=0)
+    except pd.errors.EmptyDataError:
+        return True
+    except Exception:
+        return False
+    return False
+
+
 def load_animal(
     animal_dir: Union[str, Path],
     config: ProjectConfig,
@@ -605,7 +617,8 @@ def load_animal(
 
     A session that fails to load raises (``strict=True``, default) so a broken
     file cannot silently shift session indices; ``strict=False`` logs a warning
-    and skips it.
+    and skips it. Empty files (nothing in them, not even a header) are skipped with
+    a warning first, as if absent; a session with only empty files is skipped.
     """
     animal_dir = Path(animal_dir)
     animal_id = animal_dir.name
@@ -624,6 +637,12 @@ def load_animal(
         # Find behaviour CSV(s)
         pattern = config.file_structure.behaviour_file
         csv_files = sorted(glob.glob(str(sess_dir / pattern)))
+
+        empty = [f for f in csv_files if is_empty_csv(f)]
+        if empty:
+            log.warning("%s/%s: empty file(s) skipped: %s", animal_id, sess_dir.name,
+                        ', '.join(Path(f).name for f in empty))
+            csv_files = [f for f in csv_files if f not in empty]
 
         if not csv_files:
             continue
