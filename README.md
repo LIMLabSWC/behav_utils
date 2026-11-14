@@ -36,13 +36,13 @@ your raw stimulus onto (the category boundary, or for continuous tasks the range
 A pinned release:
 
 ```bash
-pip install "behav_utils @ git+https://github.com/serkanshentyurk/behav_utils.git@v1.0.1"
+pip install "behav_utils @ git+https://github.com/serkanshentyurk/behav_utils.git@v1.0.2"
 ```
 
 Saving and reloading experiments uses Parquet, which needs pyarrow, the `store` extra:
 
 ```bash
-pip install "behav_utils[store] @ git+https://github.com/serkanshentyurk/behav_utils.git@v1.0.1"
+pip install "behav_utils[store] @ git+https://github.com/serkanshentyurk/behav_utils.git@v1.0.2"
 ```
 
 To work on the library, an editable checkout with the development tools: `pip install -e "<path to behav_utils>[dev]"`.

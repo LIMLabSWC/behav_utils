@@ -2,6 +2,22 @@
 
 Plans for later releases are in [ROADMAP.md](ROADMAP.md).
 
+## 1.0.2 — 2026-11-14
+
+Documentation only; the library behaves exactly as in 1.0.1. The changes to the source are docstrings and type
+annotations.
+
+- The docs site gains concept pages (the pipeline, tasks, the stimulus axis, identities and time, resampling
+  units), four tutorials (from files to an experiment, go/no-go, continuous responses, models), eight how-to guides,
+  a pitfalls page, and a references page; sources sit next to the definitions they support.
+- Every code example on the site runs in CI, and YAML config examples load.
+- Every public name and public method has a docstring in one standard (CONTRIBUTING, *Docstrings*), checked by
+  `tests/test_docstrings.py`. Code moved out of docstrings onto the pages.
+- Docstrings that were wrong are corrected: session ids that would clash are all numbered `_1`, `_2`, ... (not
+  `_2`, `_3` for later ones); `get_arrays` and `pool_arrays` list every key they return; `Discrete.grid` returns
+  the distribution's own values; `session_from_arrays` no longer says reaction times are unused.
+- The `docs` extra includes pyarrow; the package is classified Production/Stable.
+
 ## 1.0.1 — 2026-11-13
 
 Documentation only; the library behaves exactly as in 1.0.0.
