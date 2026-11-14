@@ -96,12 +96,24 @@ def _slice_session(session: SessionData, local_idx: np.ndarray) -> SessionData:
 
 
 def downsample(clean, n, unit='trials', with_replacement=True, n_bins=8, rng=None):
-    """Subsample clean sessions to ~n of the chosen unit; returns new [SessionData].
+    """
+    Subsample clean sessions to ~n of the chosen unit; returns new [SessionData].
 
     The matched-n draw is pooled across sessions (frozen prev_* make this safe), then split
     back per session and rebuilt, so the output is consumable by compute_psychometric_curve /
     compute_update_matrix unchanged. with_replacement=True allows a trial to be drawn more than once
     (a bootstrap resample); False is a clean subsample.
+
+    Args:
+        clean: The sessions, already filtered.
+        n: How many of ``unit`` to draw.
+        unit: 'trials' or 'sessions'.
+        with_replacement: Draw with replacement (a bootstrap resample) or without (a subsample).
+        n_bins: Stimulus bins for stratifying a trial draw.
+        rng: Random generator; None starts a fresh one.
+
+    Returns:
+        The drawn sessions.
     """
     rng = rng if rng is not None else np.random.default_rng()
     pooled = pool_arrays(clean)
@@ -170,7 +182,20 @@ def aggregate_psychometric_curves(repeats: Sequence[PsychometricCurve], n_trials
 
 def resample_psychometric_curve(clean, n, *, n_repeats=100, with_replacement=True,
                                 n_bins=8, seed=42) -> PsychometricCurve:
-    """``n_repeats`` matched-n draws of ``n`` responded trials, each fitted, then aggregated."""
+    """
+    ``n_repeats`` matched-n draws of ``n`` responded trials, each fitted, then aggregated.
+
+    Args:
+        clean: The sessions, already filtered.
+        n: Responded trials per draw.
+        n_repeats: How many draws.
+        with_replacement: Draw with replacement or without.
+        n_bins: Stimulus bins for stratifying the draws.
+        seed: Random seed.
+
+    Returns:
+        The aggregated curve.
+    """
     rng = np.random.default_rng(seed)
     reps = []
     for _ in range(n_repeats):
@@ -181,7 +206,21 @@ def resample_psychometric_curve(clean, n, *, n_repeats=100, with_replacement=Tru
 
 def resample_update_matrix(clean, n, *, n_repeats=100, with_replacement=True,
                            n_bins=8, trial_filter='post_correct', seed=42) -> UpdateMatrix:
-    """``n_repeats`` matched-n draws of ``n`` post-correct pairs, each fitted, cell-wise mean."""
+    """
+    ``n_repeats`` matched-n draws of ``n`` post-correct pairs, each fitted, cell-wise mean.
+
+    Args:
+        clean: The sessions, already filtered.
+        n: Post-correct pairs per draw.
+        n_repeats: How many draws.
+        with_replacement: Draw with replacement or without.
+        n_bins: Stimulus bins.
+        trial_filter: 'post_correct' or 'all'.
+        seed: Random seed.
+
+    Returns:
+        The cell-wise mean matrix.
+    """
     rng = np.random.default_rng(seed)
     reps = []
     for _ in range(n_repeats):
@@ -393,12 +432,20 @@ def _trial_keys(phase) -> set:
 
 
 def shared_trial_count(phase_a, phase_b) -> int:
-    """How many trials two phases have in common (same ``session_id`` and ``trial_number``).
+    """
+    How many trials two phases have in common (same ``session_id`` and ``trial_number``).
 
     Two phases cut from the same sessions overlap when one trial class contains the other, e.g.
     ``post_opto`` trials are also ``non_opto`` trials. A contrast between overlapping phases is
     diluted (the shared trials sit on both sides), and a permutation cannot give one trial two
     labels, so ``permute_phase_difference`` refuses them and ``compute_delta_stat`` refuses or warns.
+
+    Args:
+        phase_a: One phase, a list of sessions.
+        phase_b: Another.
+
+    Returns:
+        The number of trials in both.
     """
     a = _trial_keys(phase_a)
     return len(a.intersection(_trial_keys(phase_b))) if a else 0
@@ -427,7 +474,8 @@ def permute_phase_difference(
     :func:`bootstrap_phase_stats` and an interval there instead.
 
     Args:
-        phase_a, phase_b: the two phases; the difference is ``a - b``.
+        phase_a:          the first phase; the difference is ``a - b``.
+        phase_b:          the second phase.
         names:            scalar stat names.
         n_draws:          number of shuffles. The smallest reportable p is
                           ``1 / (n_draws + 1)``.
@@ -473,6 +521,17 @@ def permute_phase_difference(
 
 @dataclass(frozen=True)
 class DrawSummary:
+    """
+    The summary of one statistic's draws, from ``summarise_draws``.
+
+    Attributes:
+        ci_lo: Lower end of the percentile interval.
+        ci_hi: Upper end of the percentile interval.
+        p: The two-sided p: doubled tail proportion for bootstrap draws, the permutation p when ``observed``
+            was given.
+        median: The draws' median.
+        n_draws: How many finite draws there were.
+    """
     ci_lo: float
     ci_hi: float
     p: float
@@ -543,7 +602,18 @@ def summarise_draws(
 
 def summarise_draw_frame(draws: pd.DataFrame, *, observed: pd.Series | None = None,
                          ci: float = 0.95, null_value: float = 0.0) -> pd.DataFrame:
-    """``summarise_draws`` per column → DataFrame indexed by stat with columns ci_lo, ci_hi, p, median, n_draws."""
+    """
+    ``summarise_draws`` for every column of a frame of draws.
+
+    Args:
+        draws: Draws, one column per statistic.
+        observed: The observed values, by statistic; None when the draws are bootstrap draws.
+        ci: The interval's coverage.
+        null_value: The value the p is computed against.
+
+    Returns:
+        One row per statistic, with ``ci_lo``, ``ci_hi``, ``p``, ``median`` and ``n_draws``.
+    """
     rows = {}
     for col in draws.columns:
         obs = None if observed is None else observed.get(col)

@@ -75,13 +75,22 @@ def _roll(arrays: TrialArrays, names: List[str], window: int, step: int, min_sho
 
 @dataclass(frozen=True)
 class RollingStats:
-    """Rolling statistics as a tidy frame.
+    """
+    Rolling statistics as a tidy frame.
 
     ``curves`` columns: ``session, session_idx, session_type, distribution,
     trial, stat, value``; ``session_info`` columns: ``session, session_idx,
     session_type, distribution, n_trials`` (a session too short for any window
     still has its row). In pooled mode there is a single session labelled
     ``'pooled'``.
+
+    Attributes:
+        curves: The rolling values, a tidy frame.
+        session_info: One row per session.
+        names: The statistics computed.
+        window: Trials per window.
+        step: Trials between window starts.
+        per_session: Whether windows run within each session or over the pooled trials.
     """
 
     curves: pd.DataFrame
@@ -92,7 +101,16 @@ class RollingStats:
     per_session: bool
 
     def curve(self, stat: str, session=None) -> pd.DataFrame:
-        """``trial, value`` rows for one stat (and one session if given)."""
+        """
+        The ``trial, value`` rows of one statistic.
+
+        Args:
+            stat: The statistic.
+            session: Only this session; None for all.
+
+        Returns:
+            The rows.
+        """
         c = self.curves[self.curves['stat'] == stat]
         if session is not None:
             c = c[c['session'] == session]
@@ -103,6 +121,15 @@ class RollingStats:
         return list(self.session_info['session'])
 
     def n_trials(self, session) -> int:
+        """
+        How many trials a session has.
+
+        Args:
+            session: The session's label in ``session_info``.
+
+        Returns:
+            The count.
+        """
         return int(self.session_info.set_index('session').loc[session, 'n_trials'])
 
     def __repr__(self) -> str:

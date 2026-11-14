@@ -41,12 +41,20 @@ SESSION_COLUMNS = ['animal', 'session', 'session_type', 'distribution', 'stat', 
 
 @dataclass(frozen=True)
 class PhaseStats:
-    """Scalar statistics of one phase.
+    """
+    Scalar statistics of one phase.
 
     ``pooled`` is a float Series indexed by stat name; ``sessions`` is the tidy
     per-session frame (``SESSION_COLUMNS``: animal, session, session_type,
     distribution, stat, value, n_trials) or None. ``n_trials`` counts responded
     trials.
+
+    Attributes:
+        pooled: The pooled value of each statistic, a float Series.
+        sessions: The per-session values, a tidy frame; None unless ``per_session=True``.
+        animal: The animal, when the phase is one animal's.
+        n_sessions: Sessions in the phase.
+        n_trials: Responded trials in the phase.
     """
 
     pooled: pd.Series
@@ -60,7 +68,12 @@ class PhaseStats:
         return list(self.pooled.index)
 
     def to_rows(self) -> pd.DataFrame:
-        """Pooled values as tidy rows (session='pooled'), same columns as ``sessions``."""
+        """
+        The pooled values as tidy rows, with ``session`` set to 'pooled'.
+
+        Returns:
+            The rows, with the same columns as ``sessions``.
+        """
         return pd.DataFrame({
             'animal': self.animal, 'session': 'pooled', 'session_type': '', 'distribution': None,
             'stat': self.names, 'value': self.pooled.to_numpy(), 'n_trials': self.n_trials,

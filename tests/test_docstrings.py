@@ -1,11 +1,11 @@
 """
-The docstring standard (CONTRIBUTING, *Docstrings*), checked for the public API.
+The docstring standard (CONTRIBUTING, *Docstrings*), checked for the whole public API.
 
-Checked: every top-level name; and, for the sub-packages listed in ``SUB_PACKAGE_NAMES``, the names public only
-in the sub-package and the public methods its classes define. A docstring opens with a one-line summary ending in a full stop; a
+Checked: every top-level name; and, for the sub-packages in ``SUB_PACKAGE_NAMES`` (all of them), the names public
+only in the sub-package and the public methods its classes define. A docstring opens with a one-line summary ending in a full stop; a
 function's or method's *Args* names exactly its parameters, in order, and it has *Returns* when it returns
 something; a dataclass's *Attributes* names exactly its public fields, and an enum's names its members.
-``SUB_PACKAGE_NAMES`` grows as each sub-package's own names are brought up to the standard.
+A sub-package added later joins ``SUB_PACKAGES`` once its docstrings meet the standard.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ import re
 import behav_utils
 
 SUB_PACKAGES = ('config', 'tasks', 'data', 'stats', 'readouts', 'models', 'analysis', 'plotting')
-SUB_PACKAGE_NAMES = ('config', 'tasks', 'data', 'stats', 'readouts', 'models', 'plotting')
+SUB_PACKAGE_NAMES = SUB_PACKAGES
 _HEADER = re.compile(r'^(Args|Returns|Raises|Warns|Attributes|Yields|Examples|Notes?|See Also):\s*$')
 _ENTRY = re.compile(r'^\s*(\*{0,2}\w+)\s*(\([^)]*\))?\s*:')
 
