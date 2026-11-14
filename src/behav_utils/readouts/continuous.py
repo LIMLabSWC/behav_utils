@@ -207,6 +207,8 @@ def compute_serial_bias(arrays: TrialArrays, *, n_bins: int = 8) -> SerialBiasCu
 
     Raises:
         RequirementError: The task's responses are not continuous.
+
+    Source: the serial dependence of Fischer & Whitney (2014), measured here by a linear regression rather than a fitted curve; the docs site lists the references.
     """
     require(arrays.task, _NEEDS, 'compute_serial_bias')
     p = arrays.lag1_pairs()
