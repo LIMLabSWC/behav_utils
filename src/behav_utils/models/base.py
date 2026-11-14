@@ -23,8 +23,13 @@ from behav_utils.tasks.distributions import StimulusDistribution, Uniform
 
 @dataclass(frozen=True)
 class Responses:
-    """What a model returns: a choice per trial (NaN for no response) and, optionally, reaction times in
-    seconds."""
+    """
+    What a model returns for a run.
+
+    Attributes:
+        choice: One response per trial; NaN for no response.
+        reaction_time: Reaction times in seconds, or None.
+    """
     choice: np.ndarray
     reaction_time: np.ndarray | None = None
 
@@ -32,9 +37,18 @@ class Responses:
 @dataclass(frozen=True, eq=False)
 class Design:
     """
-    A run without its responses. ``stimulus`` is on the library's axis; ``laser``, ``abort`` and
-    ``no_response`` are per-trial flags drawn before any model sees the run (all False if omitted);
-    ``truth`` is the task's correct response per trial.
+    A run without its responses.
+
+    ``stimulus`` is on the library's axis; ``laser``, ``abort`` and ``no_response`` are per-trial flags drawn
+    before any model sees the run (all False if omitted); ``truth`` is the task's correct response per trial.
+
+    Attributes:
+        task: The task that scores the run.
+        stimulus: The stimuli, on the library's axis.
+        label: The distribution label stamped on the trials; '' for none.
+        laser: Whether each trial carries the laser.
+        abort: Whether each trial is aborted.
+        no_response: Whether each trial gets no response.
     """
     task: Task
     stimulus: np.ndarray
@@ -132,10 +146,18 @@ def make_design(
 @dataclass(frozen=True)
 class TrialInfo:
     """
-    One trial as a ``TrialwiseModel`` sees it. When it chooses: ``t`` (the trial's index in the run),
-    ``stimulus`` and ``laser``. In ``update``, also its ``choice``, ``correct`` (the task's score; None
-    where the task gives none) and ``truth`` (the correct response, NaN if none). Fields may be added in
-    later versions; a model that reads them by name keeps working.
+    One trial as a ``TrialwiseModel`` sees it.
+
+    When the model chooses, ``t``, ``stimulus`` and ``laser`` are set; in ``update`` the rest are too. Fields may
+    be added in later versions.
+
+    Attributes:
+        t: The trial's index in the run.
+        stimulus: The stimulus, on the library's axis.
+        laser: Whether the laser is on.
+        choice: The response given; None while choosing.
+        correct: The task's score of it; None while choosing, or where the task gives none.
+        truth: The correct response; None while choosing.
     """
     t: int
     stimulus: float
@@ -158,7 +180,16 @@ class Model(ABC):
 
     @abstractmethod
     def simulate(self, design: Design, rng: np.random.Generator) -> Responses:
-        """The model's responses to ``design``."""
+        """
+        The model's responses to a run.
+
+        Args:
+            design: The run.
+            rng: Random generator.
+
+        Returns:
+            The responses; aborted and no-response trials are blanked afterwards by ``simulate()``.
+        """
 
 
 class TrialwiseModel(Model):
@@ -173,15 +204,37 @@ class TrialwiseModel(Model):
     """
 
     def p_choice(self, trial: TrialInfo) -> float:
-        """The probability of response 1 (binary models)."""
+        """
+        The probability of response 1, for a binary model.
+
+        Args:
+            trial: The trial, as the model sees it before choosing.
+
+        Returns:
+            The probability.
+        """
         raise NotImplementedError(f'{type(self).__name__}: write p_choice(trial) (binary) or respond(trial, rng)')
 
     def respond(self, trial: TrialInfo, rng: np.random.Generator) -> float:
-        """The response to ``trial``; the default draws 1 with probability ``p_choice(trial)``."""
+        """
+        The response to a trial; the default draws 1 with probability ``p_choice(trial)``.
+
+        Args:
+            trial: The trial, as the model sees it before choosing.
+            rng: Random generator.
+
+        Returns:
+            The response.
+        """
         return float(rng.random() < self.p_choice(trial))
 
     def update(self, trial: TrialInfo) -> None:
-        """Learn from a completed trial; the default learns nothing."""
+        """
+        Learn from a completed trial; the default learns nothing.
+
+        Args:
+            trial: The trial, with its choice, the task's score and the truth.
+        """
         return None
 
     def reset(self) -> None:

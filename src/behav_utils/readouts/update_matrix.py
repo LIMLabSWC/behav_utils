@@ -19,12 +19,24 @@ TrialFilter = Literal['post_correct', 'all']
 
 @dataclass(frozen=True)
 class UpdateMatrix:
-    """(n_bins × n_bins) shift in P(B). Row = current-stimulus bin, column = previous-stimulus bin.
+    """
+    (n_bins × n_bins) shift in P(B). Row = current-stimulus bin, column = previous-stimulus bin.
 
     ``matrix[i, j]``  = P(B | cur bin i, prev bin j) − P(B | cur bin i), from a
     per-previous-bin cumulative-Gaussian fit minus the unconditional fit, both
     evaluated at the bin centres. NaN columns had fewer than
     ``MIN_PAIRS_PER_BIN`` pairs or a failed fit.
+
+    Attributes:
+        matrix: The shift in P(B), (n_bins, n_bins).
+        conditional: P(B) given the current and previous bins, (n_bins, n_bins).
+        unconditional: P(B) at the bin centres from the unconditional fit, (n_bins,).
+        n_pairs: Trial pairs per previous-stimulus bin, (n_bins,).
+        n_trials: Pairs entering the unconditional fit.
+        trial_filter: 'post_correct' or 'all'.
+        n_sources: How many blocks were averaged into this matrix; 1 for a single fit.
+        coverage: Sources per cell, (n_bins, n_bins), when averaged; else None.
+        sem: SEM per cell across sources, (n_bins, n_bins), when averaged; else None.
     """
 
     matrix: np.ndarray            # (n_bins, n_bins) shift in P(B)
@@ -56,12 +68,23 @@ class UpdateMatrix:
         return bin_edges(self.n_bins)
 
     def profile(self) -> np.ndarray:
-        """(n_bins,) mean shift per previous-stimulus bin (nan-aware column mean)."""
+        """
+        The mean shift per previous-stimulus bin.
+
+        Returns:
+            The column means of ``matrix``, ignoring NaN, (n_bins,).
+        """
         with np.errstate(invalid='ignore'):
             return np.nanmean(self.matrix, axis=0)
 
     def to_rows(self) -> pd.DataFrame:
-        """Tidy: one row per cell — cur_bin, prev_bin, cur_centre, prev_centre, shift, conditional."""
+        """
+        The matrix as a tidy table.
+
+        Returns:
+            One row per cell, with ``cur_bin``, ``prev_bin``, ``cur_centre``, ``prev_centre``, ``shift`` and
+            ``conditional``.
+        """
         n = self.n_bins
         i, j = np.meshgrid(np.arange(n), np.arange(n), indexing='ij')
         c = self.centres
@@ -74,7 +97,16 @@ class UpdateMatrix:
 
     @classmethod
     def from_matrix(cls, matrix, *, trial_filter: str = 'post_correct') -> UpdateMatrix:
-        """Wrap a raw shift matrix (e.g. a model-generated one) for plotting; other fields are NaN/0."""
+        """
+        Wrap a shift matrix from elsewhere, such as a model, for plotting.
+
+        Args:
+            matrix: The (n_bins, n_bins) shift in P(B).
+            trial_filter: The pairs it describes, 'post_correct' or 'all'.
+
+        Returns:
+            An ``UpdateMatrix`` whose other fields are NaN or 0.
+        """
         m = np.asarray(matrix, dtype=float)
         n = m.shape[0]
         return cls(_ro(m), _ro(np.full_like(m, np.nan)), _ro(np.full(n, np.nan)),
@@ -82,10 +114,18 @@ class UpdateMatrix:
 
     @classmethod
     def average(cls, items: Sequence[UpdateMatrix], *, min_sources: int = 1) -> UpdateMatrix:
-        """Cell-wise mean over matrices (equal weight per item; the item is the unit).
+        """
+        Cell-wise mean over matrices (equal weight per item; the item is the unit).
 
         Valid because every matrix bins on the same fixed grid. Cells backed by
         fewer than ``min_sources`` finite items are NaN.
+
+        Args:
+            items: The matrices to average, all on the same grid.
+            min_sources: The fewest finite values a cell needs to be kept.
+
+        Returns:
+            The average, with ``n_sources``, ``coverage`` and ``sem`` filled.
         """
         items = list(items)
         if not items:

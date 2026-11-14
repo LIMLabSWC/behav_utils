@@ -20,12 +20,21 @@ MU_BOUND = 0.99
 
 @dataclass(frozen=True)
 class ConditionalPsychometric:
-    """(n_bins × 4) psychometric parameters conditioned on the previous-stimulus bin.
+    """
+    (n_bins × 4) psychometric parameters conditioned on the previous-stimulus bin.
 
     A bin with fewer than ``min_per_bin`` pairs, a failed fit, or an unreliable
     fit (sigma > SLOPE_THRESHOLD or ``|mu| > MU_BOUND``) falls back to the
     unconditional parameters; ``fell_back`` records which. mu/sigma fall back
     together, lapses only on failure — matching the legacy stat exactly.
+
+    Attributes:
+        params: The four parameters per previous-stimulus bin, (n_bins, 4).
+        unconditional: The four parameters of the unconditional fit.
+        n_per_bin: Trial pairs per previous-stimulus bin.
+        fell_back: Whether each bin took the unconditional fit.
+        n_trials: Valid trials in the block.
+        success: Whether the unconditional fit succeeded.
     """
 
     params: np.ndarray            # (n_bins, 4) in PARAMS order
@@ -48,7 +57,12 @@ class ConditionalPsychometric:
         return bin_centres(self.n_bins)
 
     def to_rows(self) -> pd.DataFrame:
-        """Tidy: one row per (prev_bin, param)."""
+        """
+        The parameters as a tidy table.
+
+        Returns:
+            One row per previous-stimulus bin and parameter.
+        """
         n = self.n_bins
         return pd.DataFrame({
             'prev_bin': np.repeat(np.arange(n), 4),
@@ -60,7 +74,12 @@ class ConditionalPsychometric:
         })
 
     def to_flat(self) -> pd.Series:
-        """Legacy flat names ``cond_<param>_<bin>``, for feature vectors."""
+        """
+        The parameters under flat names ``cond_<param>_<bin>``, for feature vectors.
+
+        Returns:
+            One value per name.
+        """
         idx = [f'cond_{p}_{b}' for b in range(self.n_bins) for p in PARAMS]
         return pd.Series(self.params.ravel(), index=idx, dtype=float)
 

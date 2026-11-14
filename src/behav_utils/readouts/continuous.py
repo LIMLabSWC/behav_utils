@@ -34,8 +34,17 @@ def _binned(x: np.ndarray, y: np.ndarray, idx: np.ndarray, n_bins: int) -> tuple
 
 @dataclass(frozen=True)
 class ResponseCurve:
-    """Mean response per stimulus bin, with its SEM and count. A faithful reproducer lies on the identity
-    line; a slope below it is a pull towards the middle."""
+    """
+    Mean response per stimulus bin, with its SEM and count.
+
+    A faithful reproducer lies on the identity line; a slope below it is a pull towards the middle.
+
+    Attributes:
+        centres: Centres of the stimulus bins.
+        values: The mean response per bin.
+        sem: Its SEM.
+        counts: Trials per bin.
+    """
 
     centres: np.ndarray
     values: np.ndarray
@@ -47,6 +56,12 @@ class ResponseCurve:
         return int(self.values.shape[0])
 
     def to_rows(self) -> pd.DataFrame:
+        """
+        The readout as a tidy table.
+
+        Returns:
+            One row per bin.
+        """
         return pd.DataFrame({'bin': np.arange(self.n_bins), 'centre': self.centres, 'value': self.values,
                              'sem': self.sem, 'n': self.counts})
 
@@ -74,8 +89,20 @@ def compute_response_curve(arrays: TrialArrays, *, n_bins: int = 8) -> ResponseC
 
 @dataclass(frozen=True)
 class ErrorDistribution:
-    """Signed errors (response − truth): counts and density over symmetric bins, errors beyond the
-    outer edges counted in the end bins, with the mean, SD and number of errors."""
+    """
+    Signed errors (response − truth), binned.
+
+    Counts and density over symmetric bins, errors beyond the
+    outer edges counted in the end bins, with the mean, SD and number of errors.
+
+    Attributes:
+        edges: The bin edges.
+        counts: Errors per bin.
+        density: The density per bin.
+        mean: The mean error.
+        sd: The errors' SD.
+        n: How many errors.
+    """
 
     edges: np.ndarray
     counts: np.ndarray
@@ -85,6 +112,12 @@ class ErrorDistribution:
     n: int
 
     def to_rows(self) -> pd.DataFrame:
+        """
+        The readout as a tidy table.
+
+        Returns:
+            One row per bin.
+        """
         return pd.DataFrame({'bin': np.arange(len(self.counts)), 'left': self.edges[:-1], 'right': self.edges[1:],
                              'n': self.counts, 'density': self.density})
 
@@ -123,9 +156,19 @@ def compute_error_distribution(arrays: TrialArrays, *, n_bins: int = 20, limit: 
 
 @dataclass(frozen=True)
 class SerialBiasCurve:
-    """Mean error per bin of previous − current stimulus, with the current stimulus's linear effect
+    """
+    Mean error per bin of previous − current stimulus.
+
+    The current stimulus's linear effect is
     removed first (as in the ``serial_bias`` statistic), so a pull towards the middle does not draw a
-    false curve. Rising through zero means attraction to the previous stimulus."""
+    false curve. Rising through zero means attraction to the previous stimulus.
+
+    Attributes:
+        centres: Centres of the bins of previous − current stimulus.
+        values: The mean remaining error per bin.
+        sem: Its SEM.
+        counts: Trial pairs per bin.
+    """
 
     centres: np.ndarray
     values: np.ndarray
@@ -137,6 +180,12 @@ class SerialBiasCurve:
         return int(self.values.shape[0])
 
     def to_rows(self) -> pd.DataFrame:
+        """
+        The readout as a tidy table.
+
+        Returns:
+            One row per bin.
+        """
         return pd.DataFrame({'bin': np.arange(self.n_bins), 'centre': self.centres, 'value': self.values,
                              'sem': self.sem, 'n': self.counts})
 

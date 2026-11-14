@@ -67,10 +67,23 @@ def _responses(model, design: Design, rng: np.random.Generator) -> tuple:
     return choice, rt
 
 
-def simulate_responses(model, stimuli, task: Task | None = None, rng: np.random.Generator | None = None,
-                       laser=None) -> np.ndarray:
-    """Just the model's choices to ``stimuli`` (no aborts, no session): the fast path for many runs,
-    such as a training set for simulation-based inference."""
+def simulate_responses(model: Model, stimuli: np.ndarray, task: Task | None = None,
+                       rng: np.random.Generator | None = None, laser: np.ndarray | None = None) -> np.ndarray:
+    """
+    Just the model's choices to ``stimuli``, with no aborts and no session.
+
+    It is the fast path for many runs, such as a training set for simulation-based inference.
+
+    Args:
+        model: Anything with ``simulate(design, rng)``.
+        stimuli: The stimuli, on the library's axis.
+        task: The task; None for ``TwoAFC()``.
+        rng: Random generator; None starts a fresh one.
+        laser: Whether each trial carries the laser; None for none.
+
+    Returns:
+        One response per stimulus.
+    """
     design = Design(task if task is not None else TwoAFC(), stimuli, laser=laser)
     require(design.task, getattr(model, 'requires', frozenset()), type(model).__name__)
     return np.asarray(model.simulate(design, rng if rng is not None else np.random.default_rng()).choice,

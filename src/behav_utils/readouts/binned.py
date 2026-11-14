@@ -17,7 +17,15 @@ Kind = Literal['choice_prob', 'accuracy']
 
 @dataclass(frozen=True)
 class BinnedCurve:
-    """Per-stimulus-bin mean of either P(B) (``choice_prob``) or P(correct) (``accuracy``)."""
+    """
+    Per-stimulus-bin mean of either P(B) (``choice_prob``) or P(correct) (``accuracy``).
+
+    Attributes:
+        kind: 'choice_prob' or 'accuracy'.
+        centres: Centres of the stimulus bins.
+        values: The proportion per bin; NaN for an empty bin.
+        counts: Trials per bin.
+    """
 
     kind: str
     centres: np.ndarray      # (n_bins,)
@@ -29,6 +37,12 @@ class BinnedCurve:
         return int(self.values.shape[0])
 
     def to_rows(self) -> pd.DataFrame:
+        """
+        The curve as a tidy table.
+
+        Returns:
+            One row per bin.
+        """
         return pd.DataFrame({'bin': np.arange(self.n_bins), 'centre': self.centres,
                              'kind': self.kind, 'value': self.values, 'n': self.counts})
 

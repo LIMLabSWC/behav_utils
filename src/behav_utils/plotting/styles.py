@@ -122,12 +122,16 @@ def apply_style(dpi: int = DEFAULT_DPI, font_size: float = DEFAULT_FONT_SIZE) ->
 
 def get_colour(index_or_name):
     """
-    Resolve a colour from index (int) or name (str).
+    A colour from an index into ``PALETTE`` (wrapping round), a role in ``COLOURS``, or a colour itself.
 
-    Usage:
-        get_colour(0)         → PALETTE[0]  (blue)
-        get_colour('BE')      → COLOURS['BE']  (steelblue)
-        get_colour('#ff0000') → '#ff0000'  (passthrough)
+    ``get_colour(0)`` is ``PALETTE[0]``, ``get_colour('correct')`` is ``COLOURS['correct']``, and a colour such as
+    ``'#ff0000'`` comes back unchanged.
+
+    Args:
+        index_or_name: The index, role or colour.
+
+    Returns:
+        The colour.
     """
     if isinstance(index_or_name, int):
         return PALETTE[index_or_name % len(PALETTE)]

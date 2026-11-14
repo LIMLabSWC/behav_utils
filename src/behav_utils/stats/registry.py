@@ -80,8 +80,18 @@ def _register(entry: _Entry) -> None:
 
 def stat(name: str, *, exchangeable: bool = True, requires: Iterable[str] = (),
          instead: Mapping[str, str] | None = None):
-    """Register a single-scalar statistic ``f(arrays, *, rng) -> float``. ``requires``: the task
-    capabilities it needs (none: every task); ``instead``: {capability: counterpart} for refusals."""
+    """
+    Register a statistic that returns one number, as a decorator on ``f(arrays, *, rng) -> float``.
+
+    Args:
+        name: The statistic's name, as requested in ``compute_stats``.
+        exchangeable: Whether trials may be resampled for it, False when it depends on the order of trials.
+        requires: The task capabilities it needs; empty for every task.
+        instead: Maps a capability to a counterpart to suggest when a task with it is refused.
+
+    Returns:
+        The decorator, which registers the function and returns it unchanged.
+    """
     def decorator(func: Producer) -> Producer:
         _register(_Entry(name=name, func=func, outputs=(name,), exchangeable=exchangeable,
                          requires=frozenset(requires), instead=dict(instead or {})))
@@ -91,8 +101,19 @@ def stat(name: str, *, exchangeable: bool = True, requires: Iterable[str] = (),
 
 def fit(name: str, *, outputs: Sequence[str], exchangeable: bool = True, requires: Iterable[str] = (),
         instead: Mapping[str, str] | None = None):
-    """Register a multi-output fitter ``g(arrays, *, rng) -> tuple`` of len(outputs); ``requires`` and
-    ``instead`` as for ``stat``."""
+    """
+    Register a fitter that returns several numbers, as a decorator on ``g(arrays, *, rng) -> tuple``.
+
+    Args:
+        name: The fitter's name.
+        outputs: The names of its outputs, in the order of the tuple; each can be requested on its own.
+        exchangeable: Whether trials may be resampled for it, as for ``stat``.
+        requires: The task capabilities it needs, as for ``stat``.
+        instead: Counterparts to suggest on refusal, as for ``stat``.
+
+    Returns:
+        The decorator, which registers the function and returns it unchanged.
+    """
     outputs = tuple(outputs)
     if not outputs:
         raise ValueError(f"fit '{name}': outputs must be non-empty")
@@ -135,7 +156,15 @@ def _producer_of(name: str) -> str:
 
 
 def is_exchangeable(name: str) -> bool:
-    """Whether trial-level resampling is valid for scalar ``name``."""
+    """
+    Whether trial-level resampling is valid for a statistic.
+
+    Args:
+        name: The statistic's name.
+
+    Returns:
+        True unless it depends on the order of trials.
+    """
     return _PRODUCERS[_producer_of(name)].exchangeable
 
 

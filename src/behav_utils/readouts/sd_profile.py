@@ -26,7 +26,15 @@ MIN_CELLS = 3
 
 @dataclass(frozen=True)
 class SerialDependenceProfile:
-    """``profile[j]`` = mean over current bins i of P(B | prev j, cur i) − P(B | cur i), post-correct pairs."""
+    """
+    ``profile[j]`` = mean over current bins i of P(B | prev j, cur i) − P(B | cur i), post-correct pairs.
+
+    Attributes:
+        centres: Centres of the previous-stimulus bins.
+        profile: The mean shift in P(B) per previous-stimulus bin.
+        marginal: P(B) per current-stimulus bin, from the post-correct pairs.
+        n_pairs: Pairs per previous-stimulus bin.
+    """
 
     centres: np.ndarray      # (n_bins,)
     profile: np.ndarray      # (n_bins,) NaN where under-sampled
@@ -38,6 +46,12 @@ class SerialDependenceProfile:
         return int(self.profile.shape[0])
 
     def to_rows(self) -> pd.DataFrame:
+        """
+        The profile as a tidy table.
+
+        Returns:
+            One row per previous-stimulus bin.
+        """
         return pd.DataFrame({'prev_bin': np.arange(self.n_bins), 'prev_centre': self.centres,
                              'shift': self.profile})
 
