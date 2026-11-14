@@ -367,18 +367,19 @@ def fit_update_matrix(
         trial_filter: 'post_correct' (only after correct) or 'all'.
         no_response: Bool array (True = no response). Inferred from NaN if None.
         not_blockstart: Bool array (True = not start of block). Auto if None.
-        prev_stimuli, prev_choices, prev_correct: Frozen,
-            abort-aware lag-1 arrays aligned to every trial. If prev_stimuli is
-            given, the previous trial is taken from these (NOT from array
-            adjacency), so the matrix is correct on a non-consecutive subset
-            (e.g. opto-only or post-opto trials). If None, the previous trial is
-            the immediately preceding array element via not_blockstart (the
-            simulated / SBI path, unchanged).
+        prev_stimuli: The previous trial's stimulus for every trial, from the frozen, abort-aware lag-1
+            view. When given, the previous trial is taken from these, not from array adjacency, so the
+            matrix is correct on a non-consecutive subset such as the opto trials only. None takes the
+            preceding array element instead, through ``not_blockstart``.
+        prev_choices: The previous trial's choice, aligned the same way.
+        prev_correct: The previous trial's score, aligned the same way; required with ``prev_stimuli``.
 
     Returns:
-        update_matrix: (n_bins, n_bins) shift in P(B)
-        conditional_matrix: (n_bins, n_bins) conditional P(B) values
-        info: Dict with fitting details
+        The tuple ``(update_matrix, conditional_matrix, info)``, with the (n_bins, n_bins) shift in P(B), the
+        (n_bins, n_bins) conditional P(B) values, and a dict of fitting details.
+
+    Raises:
+        ValueError: ``prev_stimuli`` is given without ``prev_correct``.
     """
     stimuli = np.asarray(stimuli, dtype=np.float64)
     choices = np.asarray(choices, dtype=np.float64)
@@ -491,7 +492,16 @@ def fit_update_matrix(
 
 
 def matrix_error(matrix1: np.ndarray, matrix2: np.ndarray) -> float:
-    """Mean squared error between two matrices, ignoring NaNs."""
+    """
+    Mean squared error between two matrices, ignoring NaNs.
+
+    Args:
+        matrix1: One matrix.
+        matrix2: Another of the same shape.
+
+    Returns:
+        The mean of the squared differences over the cells where both are finite.
+    """
     diff = matrix1 - matrix2
     valid = ~np.isnan(diff)
     if np.sum(valid) == 0:

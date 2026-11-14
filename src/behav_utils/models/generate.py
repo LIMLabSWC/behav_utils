@@ -35,11 +35,22 @@ DEFAULT_NO_RESPONSE_RATE = 0.02
 @dataclass(frozen=True)
 class Timing:
     """
-    How a synthetic trial unfolds, in seconds. The session starts ``session_start`` after midnight. Each
+    How a synthetic trial unfolds, in seconds.
+
+    The session starts ``session_start`` after midnight. Each
     trial presents the stimulus ``stimulus_delay`` after it starts; a response follows after the reaction
     time (lognormal with median ``rt_median`` and log-sd ``rt_sigma``, unless the model gives its own), a
     trial without one waits out ``response_window``, and an abort ends ``abort_after`` after the stimulus.
     The next trial starts ``iti`` later.
+
+    Attributes:
+        session_start: Seconds after midnight at which the session starts.
+        stimulus_delay: Seconds from a trial's start to the stimulus.
+        rt_median: Median of the lognormal reaction time.
+        rt_sigma: Log-SD of the lognormal reaction time.
+        response_window: How long a trial without a response waits.
+        abort_after: Seconds after the stimulus at which an abort ends the trial.
+        iti: Seconds from one trial's end to the next trial's start.
     """
     session_start: float = 9 * 3600.0
     stimulus_delay: float = 0.5

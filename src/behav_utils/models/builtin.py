@@ -169,10 +169,23 @@ class IdealObserver(Model):
 
 def normative_pse(distribution: StimulusDistribution, noise: float, task: Task | None = None) -> float:
     """
-    The ideal observer's point of subjective equality: the percept at which both categories are equally
-    probable under ``distribution`` with sensory noise ``noise``. With a likelihood that rises with the
-    stimulus, the observer answers 1 above it, so it is also the PSE a psychometric fit to its choices
-    estimates. NaN, with a warning, if no such point lies near the support.
+    The ideal observer's point of subjective equality.
+
+    It is the percept at which both categories are equally probable under ``distribution`` with sensory noise
+    ``noise``. With a likelihood that rises with the stimulus, the observer answers 1 above it, so it is also
+    the PSE a psychometric fit to its choices estimates. NaN, with a warning, if no such point lies near the
+    support.
+
+    Args:
+        distribution: The stimulus distribution, which is also the observer's prior.
+        noise: SD of the sensory noise, on the library's axis.
+        task: The task; None for ``TwoAFC()``.
+
+    Returns:
+        The PSE, or NaN when no such point lies near the support.
+
+    Warns:
+        UserWarning: No such point lies near the support.
     """
     task = task if task is not None else TwoAFC()
     require(task, ('binary', 'stimulus_axis'), 'normative_pse')
@@ -197,10 +210,18 @@ def normative_pse(distribution: StimulusDistribution, noise: float, task: Task |
 
 def normative_slope(distribution: StimulusDistribution, noise: float) -> float:
     """
-    The ideal observer's expected response slope on a continuous task: the least-squares slope of its
-    posterior-mean response on the stimulus, stimuli drawn from ``distribution`` (also its prior) and
-    percepts carrying Gaussian noise of sd ``noise``. Below 1 is the pull towards the middle a Bayesian
-    observer shows; for a Gaussian prior of sd s it is s² / (s² + noise²).
+    The ideal observer's expected response slope on a continuous task.
+
+    It is the least-squares slope of its posterior-mean response on the stimulus, stimuli drawn from
+    ``distribution`` (also its prior) and percepts carrying Gaussian noise of sd ``noise``. Below 1 is the pull
+    towards the middle a Bayesian observer shows; for a Gaussian prior of sd s it is s² / (s² + noise²).
+
+    Args:
+        distribution: The stimulus distribution, which is also the observer's prior.
+        noise: SD of the sensory noise, on the library's axis.
+
+    Returns:
+        The expected slope.
     """
     points, weights = distribution.grid()
     nodes, node_weights = np.polynomial.hermite_e.hermegauss(41)

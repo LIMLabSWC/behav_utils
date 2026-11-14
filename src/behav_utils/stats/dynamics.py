@@ -126,8 +126,17 @@ def _fit_step(t, stim, choice, n, shape=None):
 
 
 def fit_pse_dynamics(a: TrialArrays, shape=None) -> tuple:
-    """The PSE_DYNAMICS tuple for one block. ``shape=(sigma, lapse_low, lapse_high)`` pins the
-    psychometric shape so only the criterion trajectory is fitted (3 free parameters instead of 6)."""
+    """
+    The ``PSE_DYNAMICS`` values for one block.
+
+    Args:
+        a: The block's trials.
+        shape: ``(sigma, lapse_low, lapse_high)`` to pin the psychometric shape, so that only the criterion's
+            trajectory is fitted (three free parameters instead of six); None to fit all six.
+
+    Returns:
+        The values, in the order of ``PSE_DYNAMICS``.
+    """
     nan = tuple(np.nan for _ in PSE_DYNAMICS)
     v = a.valid()
     n = v.n_trials

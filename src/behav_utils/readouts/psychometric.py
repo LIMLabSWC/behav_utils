@@ -17,13 +17,30 @@ PARAMS = ('mu', 'sigma', 'lapse_low', 'lapse_high')
 
 @dataclass(frozen=True)
 class PsychometricCurve:
-    """Cumulative-Gaussian fit to P(B | stimulus), with binned data and a bootstrap band.
+    """
+    Cumulative-Gaussian fit to P(B | stimulus), with binned data and a bootstrap band.
 
     ``ci`` is a (4, 2) array of 95% intervals in PARAMS order and ``band`` a
     (2, len(x)) array of curve percentiles; both are None when
     ``n_bootstrap=0`` or no bootstrap fit succeeded. ``success`` False means
     the point fit failed: params are NaN, ``y`` is NaN, the binned data are
     still filled.
+
+    Attributes:
+        mu: The point of subjective equality.
+        sigma: The cumulative Gaussian's SD.
+        lapse_low: The lower lapse rate.
+        lapse_high: The upper lapse rate.
+        x: Where the fitted curve is evaluated.
+        y: The fitted curve at ``x``.
+        bin_centres: Centres of the stimulus bins.
+        bin_means: P(B) per bin, from the trials.
+        bin_counts: Trials per bin.
+        n_trials: Trials fitted.
+        success: Whether the fit succeeded.
+        ci: 95% intervals of the four parameters, (4, 2), or None without a bootstrap.
+        band: The curve's 95% band, (2, len(x)), or None without a bootstrap.
+        n_bootstrap: Bootstrap fits that succeeded.
     """
 
     mu: float
@@ -52,7 +69,12 @@ class PsychometricCurve:
                          index=list(PARAMS), dtype=float, name='value')
 
     def to_rows(self) -> pd.DataFrame:
-        """Tidy: one row per parameter — param, value, lo, hi."""
+        """
+        The parameters as a tidy table.
+
+        Returns:
+            One row per parameter, with ``param``, ``value``, ``lo`` and ``hi``.
+        """
         ci = self.ci if self.ci is not None else np.full((4, 2), np.nan)
         return pd.DataFrame({'param': list(PARAMS), 'value': self.params.to_numpy(),
                              'lo': ci[:, 0], 'hi': ci[:, 1]})
