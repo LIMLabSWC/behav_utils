@@ -436,6 +436,8 @@ def rank_test(
 
     Returns:
         The test's result.
+
+    Source: the Wilcoxon signed-rank test (Wilcoxon, 1945) and the Mann–Whitney U test (Mann & Whitney, 1947); the docs site lists the references.
     """
     from scipy.stats import mannwhitneyu, wilcoxon
 

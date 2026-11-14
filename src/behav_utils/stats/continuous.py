@@ -60,11 +60,15 @@ def response_slope(a: TrialArrays, *, rng) -> float:
 
 @stat('serial_bias', requires=_CONTINUOUS, exchangeable=False)
 def serial_bias(a: TrialArrays, *, rng) -> float:
-    """How far the error leans towards the previous trial's stimulus: the coefficient of previous −
+    """
+    How far the error leans towards the previous trial's stimulus: the coefficient of previous −
     current stimulus when the error is regressed on it and on the current stimulus. Positive is
     attraction, negative repulsion. The current stimulus is in the regression because a pull towards
     the middle (``response_slope`` below 1) also makes the error depend on it; without it, that pull
-    would show up here as a serial effect."""
+    would show up here as a serial effect.
+
+    Source: the serial dependence of Fischer & Whitney (2014), measured here by a linear regression rather than a fitted curve; the docs site lists the references.
+    """
     p = a.lag1_pairs()
     ok = ~np.isnan(p.truth) & ~np.isnan(p.prev_stimulus) & ~np.isnan(p.choice)
     if ok.sum() < MIN_RESPONDED:

@@ -197,11 +197,14 @@ def _neg_ll_grad(beta, X, y, l2=0.0):
 
 @fit('logistic_history', requires=('two_choices', 'stimulus_axis', 'scored'), outputs=LOGISTIC_HISTORY, exchangeable=False)
 def logistic_history(a: TrialArrays, *, rng) -> tuple:
-    """L2-regularised logistic regression of choice on stimulus + N_BACK trials of history.
+    """
+    L2-regularised logistic regression of choice on stimulus + N_BACK trials of history.
 
     Outputs: stimulus weight, previous-choice weights 1..N_BACK, previous-
     outcome weights 1..N_BACK, and the exponential decay rate of the
     previous-choice weights across lags.
+
+    Source: a logistic regression of the choice on the stimulus and on recent choices and outcomes, the approach of Fründ, Wichmann & Macke (2014); the docs site lists the references.
     """
     nan = tuple(np.nan for _ in LOGISTIC_HISTORY)
     v = a.valid()
@@ -233,7 +236,11 @@ def logistic_history(a: TrialArrays, *, rng) -> tuple:
 
 @stat('history_interaction_r2', requires=('two_choices', 'stimulus_axis', 'scored'), exchangeable=False)
 def history_interaction_r2(a: TrialArrays, *, rng) -> float:
-    """McFadden pseudo-R² gained by adding N_BACK trials of history to a stimulus-only model."""
+    """
+    McFadden pseudo-R² gained by adding N_BACK trials of history to a stimulus-only model.
+
+    Source: McFadden's pseudo-R² (McFadden, 1974); the docs site lists the references.
+    """
     v = a.valid()
     if v.n_trials < 30:
         return np.nan
