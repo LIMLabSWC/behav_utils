@@ -62,8 +62,8 @@ plotters, no project vocabulary, downward-only imports, `exchangeable=False` on 
 
 ## Docstrings
 
-Google style, which the API pages render through napoleon, and `tests/test_docstrings.py` checks for the
-sub-packages listed in its `DOCUMENTED`:
+Google style, which the API pages render through napoleon. `tests/test_docstrings.py` checks every public name
+and the public methods of the public classes:
 
 - The first line is a one-sentence summary ending in a full stop; `docs/public_api.md` quotes it.
 - *Args* lists every parameter, one per line in signature order (`*args` and `**kwargs` included), with

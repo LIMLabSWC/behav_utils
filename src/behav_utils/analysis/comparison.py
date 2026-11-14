@@ -68,7 +68,19 @@ def _contrast_key(phase: str, reference: str) -> str:
 
 @dataclass(frozen=True)
 class PhaseSummary:
-    """One condition: observed stats, its bootstrap draws per unit, and optional readouts."""
+    """
+    One condition: observed stats, its bootstrap draws per unit, and optional readouts.
+
+    Attributes:
+        label: The phase's label.
+        stats: The observed value of each statistic.
+        n_trials: Responded trials in the phase.
+        n_sessions: Sessions in the phase.
+        draws: The bootstrap draws per unit, ``{unit: frame}``.
+        stats_matched: The values on the matched-n draw, when ``downsample`` was set; else None.
+        curve: The psychometric curve, when requested; else None.
+        update_matrix: The update matrix, when requested; else None.
+    """
 
     label: str
     stats: pd.Series                               # observed, indexed by stat
@@ -84,7 +96,16 @@ class PhaseSummary:
         return tuple(self.draws)
 
     def ci(self, unit: str | None = None, *, ci: float = 0.95) -> pd.DataFrame:
-        """Bootstrap interval per stat for ``unit`` (default: first available). Columns ci_lo, ci_hi, p, median, n_draws."""
+        """
+        The bootstrap interval of each statistic.
+
+        Args:
+            unit: The resampling unit; None for the first one available.
+            ci: The interval's coverage.
+
+        Returns:
+            One row per statistic, with ``ci_lo``, ``ci_hi``, ``p``, ``median`` and ``n_draws``.
+        """
         unit = _pick_unit(self.draws, unit)
         if unit is None:
             return _empty_summary(self.stats.index)
@@ -97,7 +118,23 @@ class PhaseSummary:
 
 @dataclass(frozen=True)
 class Contrast:
-    """Δ = a − b, with difference draws per unit and an optional permutation p."""
+    """
+    Δ = a − b, with difference draws per unit and an optional permutation p.
+
+    Attributes:
+        label_a: The compared phase.
+        label_b: The reference phase.
+        diff: The observed difference ``a − b`` per statistic.
+        n_a: Responded trials in the compared phase.
+        n_b: Responded trials in the reference.
+        n_sessions_a: Sessions in the compared phase.
+        n_sessions_b: Sessions in the reference.
+        difference_draws: The bootstrap draws of the difference per unit, ``{unit: frame}``.
+        perm_p: The permutation p per statistic, when permutations were run; else None.
+        um_diff: The difference of the two update matrices, when computed; else None.
+        um_rmse: The root-mean-square of ``um_diff``, when computed.
+        um_corr: The correlation between the two update matrices, when computed.
+    """
 
     label_a: str
     label_b: str
@@ -121,14 +158,32 @@ class Contrast:
         return tuple(self.difference_draws)
 
     def boot(self, unit: str | None = None, *, ci: float = 0.95) -> pd.DataFrame:
-        """Bootstrap ci_lo, ci_hi, p (two-sided vs 0), median, n_draws per stat."""
+        """
+        The bootstrap interval of each difference, with its two-sided p against 0.
+
+        Args:
+            unit: The resampling unit; None for the first one available.
+            ci: The interval's coverage.
+
+        Returns:
+            One row per statistic, with ``ci_lo``, ``ci_hi``, ``p``, ``median`` and ``n_draws``.
+        """
         unit = _pick_unit(self.difference_draws, unit)
         if unit is None:
             return _empty_summary(self.diff.index)
         return summarise_draw_frame(self.difference_draws[unit], ci=ci)
 
     def table(self, unit: str | None = None, *, ci: float = 0.95) -> pd.DataFrame:
-        """One row per stat: diff, ci_lo, ci_hi, boot_p, perm_p, unit."""
+        """
+        The contrast as a table.
+
+        Args:
+            unit: The resampling unit; None for the first one available.
+            ci: The interval's coverage.
+
+        Returns:
+            One row per statistic, with ``diff``, ``ci_lo``, ``ci_hi``, ``boot_p``, ``perm_p`` and ``unit``.
+        """
         b = self.boot(unit, ci=ci)
         unit = _pick_unit(self.difference_draws, unit)
         t = pd.DataFrame({'stat': self.diff.index, 'diff': self.diff.to_numpy()})
@@ -146,7 +201,19 @@ class Contrast:
 
 @dataclass(frozen=True)
 class DeltaStats:
-    """Result of :func:`compute_delta_stat`."""
+    """
+    Result of :func:`compute_delta_stat`.
+
+    Attributes:
+        phases: Each phase's summary, ``{label: PhaseSummary}``.
+        contrasts: Each phase against the reference, ``{label: Contrast}``.
+        reference: The reference phase's label.
+        names: The statistics compared.
+        units: The resampling units used.
+        downsample: Whether the phases were matched to the same number of trials.
+        n_matched: The matched number of trials per unit, when they were.
+        seed: The random seed.
+    """
 
     phases: Dict[str, PhaseSummary]
     contrasts: Dict[str, Contrast]       # keyed by ``_contrast_key(label, reference)``
@@ -162,11 +229,28 @@ class DeltaStats:
         return self.units[0] if self.units else 'trials'
 
     def contrast(self, label: str) -> Contrast:
-        """The contrast of ``label`` vs the reference."""
+        """
+        The contrast of one phase against the reference.
+
+        Args:
+            label: The phase's label.
+
+        Returns:
+            The contrast.
+        """
         return self.contrasts[_contrast_key(label, self.reference)]
 
     def table(self, unit: str | None = None, *, ci: float = 0.95) -> pd.DataFrame:
-        """All contrasts stacked; adds a ``contrast`` column."""
+        """
+        All contrasts in one table, with a ``contrast`` column.
+
+        Args:
+            unit: The resampling unit; None for the first one available.
+            ci: The interval's coverage.
+
+        Returns:
+            One row per contrast and statistic.
+        """
         frames = [c.table(unit, ci=ci).assign(contrast=k) for k, c in self.contrasts.items()]
         return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
@@ -177,7 +261,22 @@ class DeltaStats:
 
 @dataclass(frozen=True)
 class Interaction:
-    """Difference of differences: (Δ_a) − (Δ_b), bootstrap only."""
+    """
+    Difference of differences: (Δ_a) − (Δ_b), bootstrap only.
+
+    Attributes:
+        label_a: The first result's name.
+        label_b: The second result's name.
+        contrast_a: The contrast taken from the first result.
+        contrast_b: The contrast taken from the second.
+        delta_a: The first contrast's difference per statistic.
+        delta_b: The second's.
+        interaction: ``delta_a − delta_b`` per statistic.
+        draws: The bootstrap draws of the interaction per unit.
+        draws_a: The first contrast's draws per unit.
+        draws_b: The second's.
+        shared_result: Whether both contrasts came from one result, so their shared reference cancels.
+    """
 
     label_a: str
     label_b: str
@@ -196,7 +295,17 @@ class Interaction:
         return tuple(self.draws)
 
     def table(self, unit: str | None = None, *, ci: float = 0.95) -> pd.DataFrame:
-        """Per stat: delta_a, ci_a_lo/hi, delta_b, ci_b_lo/hi, interaction, ci_lo, ci_hi, p, n_draws."""
+        """
+        The interaction as a table.
+
+        Args:
+            unit: The resampling unit; None for the first one available.
+            ci: The interval's coverage.
+
+        Returns:
+            One row per statistic, with ``delta_a`` and its interval, ``delta_b`` and its interval, ``interaction``,
+            ``ci_lo``, ``ci_hi``, ``p`` and ``n_draws``.
+        """
         unit = _pick_unit(self.draws, unit)
         if unit is None:
             return pd.DataFrame()

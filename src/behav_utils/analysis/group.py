@@ -47,22 +47,52 @@ __all__ = ['combine', 'paired_diff', 'bootstrap_units', 'rank_test', 'average_ar
 
 @dataclass(frozen=True)
 class UnitBootstrap:
-    """Across-unit bootstrap of one per-unit value array (``bootstrap_units``)."""
+    """
+    Across-unit bootstrap of one per-unit value array (``bootstrap_units``).
+
+    Attributes:
+        point: The statistic of the units' values, the mean by default.
+        lo: Lower end of the interval.
+        hi: Upper end of the interval.
+        n: How many units.
+    """
     point: float
     lo: float
     hi: float
     n: int
 
     def to_rows(self) -> pd.DataFrame:
+        """
+        The result as a one-row table.
+
+        Returns:
+            The row.
+        """
         return pd.DataFrame([{'point': self.point, 'lo': self.lo, 'hi': self.hi, 'n': self.n}])
 
 
 @dataclass(frozen=True)
 class RankTest:
-    """One rank test (``rank_test``): Wilcoxon signed-rank (paired) or Mann-Whitney U.
+    """
+    One rank test (``rank_test``): Wilcoxon signed-rank (paired) or Mann-Whitney U.
 
     ``n`` is the number of pairs used (paired) or ``n_a + n_b`` (unpaired);
     ``min_p`` the smallest two-sided p this test could return at that size.
+
+    Attributes:
+        test: 'signed_rank' or 'rank_sum'.
+        paired: Whether the test was paired.
+        alternative: 'two-sided', 'less' or 'greater'.
+        statistic: The test statistic.
+        p: The p value.
+        n_a: Values in the first group.
+        n_b: Values in the second group.
+        min_p: The smallest two-sided p the test could give at these sizes.
+        group_a: The first group's label.
+        group_b: The second group's label.
+        median_a: The first group's median.
+        median_b: The second group's median.
+        note: Why the test could not run, when it could not; else ''.
     """
     test: str
     paired: bool
@@ -83,6 +113,12 @@ class RankTest:
         return self.n_a if self.paired else self.n_a + self.n_b
 
     def to_rows(self) -> pd.DataFrame:
+        """
+        The result as a one-row table.
+
+        Returns:
+            The row.
+        """
         return pd.DataFrame([{f: getattr(self, f) for f in self.__dataclass_fields__}])
 
     def __repr__(self) -> str:
@@ -92,7 +128,14 @@ class RankTest:
 
 @dataclass(frozen=True)
 class ArrayAverage:
-    """Element-wise mean and SEM across a stack (``average_arrays``)."""
+    """
+    Element-wise mean and SEM across a stack (``average_arrays``).
+
+    Attributes:
+        mean: The element-wise mean.
+        sem: The element-wise SEM.
+        n: How many arrays were averaged.
+    """
     mean: np.ndarray
     sem: np.ndarray
     n: int
@@ -100,7 +143,15 @@ class ArrayAverage:
 
 @dataclass(frozen=True)
 class GroupComparison:
-    """One :class:`RankTest` per stat between two groups of animals (``compare_groups``)."""
+    """
+    One :class:`RankTest` per stat between two groups of animals (``compare_groups``).
+
+    Attributes:
+        tests: One rank test per statistic, ``{stat: RankTest}``.
+        group_a: The first group's label.
+        group_b: The second group's label.
+        paired: Whether the tests were paired.
+    """
     tests: Dict[str, RankTest] = field(default_factory=dict)
     group_a: object = None
     group_b: object = None
@@ -111,10 +162,25 @@ class GroupComparison:
         return list(self.tests)
 
     def test(self, stat: str) -> RankTest:
+        """
+        The rank test for one statistic.
+
+        Args:
+            stat: The statistic.
+
+        Returns:
+            The test.
+        """
         return self.tests[stat]
 
     def table(self) -> pd.DataFrame:
-        """One tidy row per stat: ``stat, group_a, group_b, n_a, n_b, median_a, median_b, statistic, p, min_p, note``."""
+        """
+        One tidy row per statistic.
+
+        Returns:
+            The rows, with ``stat``, ``group_a``, ``group_b``, ``n_a``, ``n_b``, ``median_a``, ``median_b``,
+            ``statistic``, ``p``, ``min_p`` and ``note``.
+        """
         cols = ['stat', 'group_a', 'group_b', 'n_a', 'n_b', 'median_a', 'median_b', 'statistic', 'p', 'min_p', 'note']
         rows = [{'stat': k, **{c: getattr(t, c) for c in cols[1:]}} for k, t in self.tests.items()]
         return pd.DataFrame(rows, columns=cols)
@@ -154,8 +220,8 @@ def combine(
                 when ``how='median'``).
 
     Returns:
-        Collapsed frame: grouping keys + ``value``, ``n_trials`` (summed) and
-        ``n_units`` (number of contributing rows).
+        The collapsed frame, with the grouping keys, ``value``, ``n_trials`` (summed) and ``n_units`` (the
+        number of contributing rows).
 
     Raises:
         ValueError: if ``over`` is absent, already collapsed (all-<NA>), or if no
@@ -236,7 +302,8 @@ def paired_diff(
     Args:
         points: tidy stat frame.
         by:     label column holding the two conditions.
-        a, b:   the two levels of ``by``; difference is ``a - b``.
+        a:      the first level of ``by``; the difference is ``a - b``.
+        b:      the second level of ``by``.
         keys:   the unit identifier(s) (e.g. ``('animal',)``); used only to name
                 dropped units in the warning.
         value:  value column.
@@ -343,7 +410,8 @@ def rank_test(
     paired: bool = False,
     alternative: str = 'two-sided',
 ) -> RankTest:
-    """Rank test between two per-unit value arrays.
+    """
+    Rank test between two per-unit value arrays.
 
     Paired → Wilcoxon signed-rank (requires aligned, equal-length arrays; align
     with :func:`paired_diff` first). Unpaired → Mann-Whitney U. Plain arrays in,
@@ -359,6 +427,15 @@ def rank_test(
 
     Raises:
         ValueError: paired with mismatched lengths.
+
+    Args:
+        a: One group's values, one per unit.
+        b: The other group's, aligned with ``a`` when paired.
+        paired: Use the Wilcoxon signed-rank test on ``a - b`` instead of Mann–Whitney U.
+        alternative: 'two-sided', 'less' or 'greater'.
+
+    Returns:
+        The test's result.
     """
     from scipy.stats import mannwhitneyu, wilcoxon
 
@@ -464,7 +541,8 @@ def min_achievable_p(test, *, n=None, n1=None, n2=None):
               'rank_sum'  (Mann-Whitney U / unpaired) — needs ``n1``, ``n2``;
               floor = 2 / C(n1 + n2, n1) (the most extreme rank separation).
         n:      non-zero pair count for 'signed_rank'.
-        n1, n2: group sizes for 'rank_sum'.
+        n1:     the first group's size, for 'rank_sum'.
+        n2:     the second group's size, for 'rank_sum'.
 
     Returns:
         Minimum two-sided p in (0, 1], or nan if sizes are missing / too small.
