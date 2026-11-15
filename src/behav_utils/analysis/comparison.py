@@ -13,6 +13,11 @@ are stored; every contrast and interaction is a subtraction of those stored
 draw frames, so a shared reference cancels exactly ((A − C) − (B − C) = A − B)
 instead of contributing its variance twice.
 
+The session bootstrap draws all phases together: sessions two phases share are
+drawn once for both, so a contrast within the same sessions (laser on − off) is
+paired and their common session-to-session variation cancels. Phases with
+different sessions are drawn separately, each keeping its number of sessions.
+
 Two engines (see ``behav_utils.analysis.resampling``): a per-trial or
 per-session bootstrap for intervals, and — only where the label was randomised
 per trial (opto within a session type) — a permutation null for a p-value. The
@@ -34,6 +39,8 @@ import numpy as np
 import pandas as pd
 
 from behav_utils.analysis.resampling import (
+    _bootstrap_sessions_jointly,
+    _session_groups,
     bootstrap_phase_stats,
     permute_phase_difference,
     shared_trial_count,
@@ -391,8 +398,12 @@ def compute_delta_stat(
                         raised. Floor is ``1 / (n_permutations + 1)``.
         n_bootstrap:    resamples per phase per unit (0 to skip).
         units:          resampling units, e.g. ``('trials', 'sessions')``. The
-                        first is the default for ``.boot()`` / ``.table()``. A
-                        phase with < 2 sessions gets no session draws.
+                        first is the default for ``.boot()`` / ``.table()``. Sessions
+                        are drawn once per draw for all phases, within groups of
+                        sessions that belong to the same phases: phases cut from the
+                        same sessions get the same sessions in every draw (a paired
+                        contrast), and phases with different sessions are drawn
+                        separately. A phase with < 2 sessions gets no session draws.
         n_bins:         Stimulus bins of the update matrices.
         trial_filter:   Which pairs the update matrices use, 'post_correct' or 'all'.
         n_repeats:      matched-n draws for the readouts when downsampling.
@@ -412,6 +423,9 @@ def compute_delta_stat(
             requested). One trial class containing another, e.g. ``post_opto``
             inside ``non_opto``, dilutes the contrast; make the reference
             disjoint with a ``mask_fn``.
+        UserWarning: with the session unit, a session has no other session in the
+            same phases to be drawn with (the phases share only some of their
+            sessions), so its variation is left out of the session interval.
     """
     items = _as_items(phases, labels)
     order = [lab for lab, _ in items]
@@ -461,6 +475,23 @@ def compute_delta_stat(
             n_matched['pairs'] = _calculate_min_n(groups, unit='pairs')
     draw_n = n_matched.get('trials') if downsample else None
 
+    # ── session draws: all phases together, so shared sessions are paired ──
+    session_draws: Dict[str, pd.DataFrame] = {}
+    if n_bootstrap > 0 and names and 'sessions' in units:
+        eligible = {label: phase for label, phase in items if len(phase) >= 2}
+        alone = [(owners, ids[0]) for owners, ids in _session_groups(eligible) if len(ids) == 1]
+        if alone:
+            listed = '; '.join(f'{session_id!r} (in {", ".join(map(repr, owners))})'
+                               for owners, session_id in alone)
+            warnings.warn(
+                f'compute_delta_stat: {len(alone)} session(s) have no other session in the same phases to be '
+                f'drawn with, so every session draw keeps them as they are and the session interval leaves '
+                f'out their variation: {listed}. This happens when phases share only some of their sessions.',
+                stacklevel=2)
+        u_idx = units.index('sessions')
+        session_draws = _bootstrap_sessions_jointly(
+            eligible, names, n_draws=n_bootstrap, seed=seed + u_idx * 1_000_003)
+
     # ── per phase ─────────────────────────────────────────────────────────
     summaries: Dict[str, PhaseSummary] = {}
     for i, (label, phase) in enumerate(items):
@@ -471,9 +502,11 @@ def compute_delta_stat(
         draws: Dict[str, pd.DataFrame] = {}
         if n_bootstrap > 0 and names:
             for u_idx, unit in enumerate(units):
-                if unit == 'trials' and n_trials < MIN_TRIALS_FOR_RESAMPLING:
+                if unit == 'sessions':
+                    if label in session_draws:
+                        draws[unit] = session_draws[label]
                     continue
-                if unit == 'sessions' and n_sessions < 2:
+                if n_trials < MIN_TRIALS_FOR_RESAMPLING:
                     continue
                 u_seed = (seed + i) if u_idx == 0 else (seed + i + u_idx * 1_000_003)
                 draws[unit] = bootstrap_phase_stats(

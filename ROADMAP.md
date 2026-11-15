@@ -5,7 +5,7 @@ that would break the public API waits for 2.0 (*Stability* in [CONTRIBUTING.md](
 upper bounds in focused hours, given only where one was made. When an item ships, it leaves this file and enters
 the [CHANGELOG](CHANGELOG.md).
 
-## 1.1: streams
+## 1.2: streams
 
 Recordings alongside behaviour (pupil, imaging, spikes, licks), aligned to trials. Planned as six steps on a new
 branch, about 115 h, built against the first real recording rather than in advance, so that no stream API is

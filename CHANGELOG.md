@@ -2,6 +2,36 @@
 
 Plans for later releases are in [ROADMAP.md](ROADMAP.md).
 
+## 1.1.0 — 2026-11-15
+
+One change moves numbers: the session-unit intervals of `compute_delta_stat`. Everything else gives the same values
+as 1.0.2.
+
+- ▲ The session bootstrap of `compute_delta_stat` draws the sessions of all its phases together. Sessions are
+  resampled within groups that belong to the same phases, so two phases cut from the same sessions (laser on and
+  off) get the same sessions in every draw and their shared session-to-session variation cancels in the
+  difference. Until now each phase drew its sessions independently, which left that variation in the difference
+  and made the interval of a within-session contrast too wide (and its bootstrap p too large). Phases with
+  different sessions are still drawn separately, each keeping its number of sessions, but from a different random
+  stream, so their session intervals move by resampling noise. Trial-unit intervals, permutation p-values and
+  observed values are unchanged, and so is `bootstrap_phase_stats` called on one phase. No signature changes.
+  With the excess width gone, the usual limit of a bootstrap over few units shows: from fewer than about ten
+  sessions the session interval is too narrow (*Resampling units* in the docs).
+- `compute_delta_stat` warns when, with the session unit, a session has no other session in the same phases to be
+  drawn with (the phases share only some of their sessions): it is the same in every draw, so the interval leaves
+  out its variation.
+- `downsample`: the docstring named a `'sessions'` unit that does not exist (the units are `'trials'` and
+  `'pairs'`), and `rng` now also takes an int seed.
+- The golden values are regenerated per table: `python tests/golden/make_golden.py --table delta`. Without
+  `--table` the script failed in 1.0.2, because it asked for statistics the 2-AFC task cannot compute; it now
+  uses the pinned statistics. Only the session-unit rows of `delta.csv` changed.
+- CI runs the suite on Python 3.11 with the oldest dependency versions `pyproject.toml` allows, so the declared
+  floors are tested.
+- `CITATION.cff` added. A test keeps its version, and the version in the README's install commands, equal to
+  `__version__`.
+- Streams (recordings aligned to trials) are now planned for 1.2; the README, the roadmap and the contributor
+  notes say so consistently.
+
 ## 1.0.2 — 2026-11-14
 
 Documentation only; the library behaves exactly as in 1.0.1. The changes to the source are docstrings and type

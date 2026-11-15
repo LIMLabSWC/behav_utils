@@ -36,13 +36,13 @@ your raw stimulus onto (the category boundary, or for continuous tasks the range
 A pinned release:
 
 ```bash
-pip install "behav_utils @ git+https://github.com/serkanshentyurk/behav_utils.git@v1.0.2"
+pip install "behav_utils @ git+https://github.com/serkanshentyurk/behav_utils.git@v1.1.0"
 ```
 
 Saving and reloading experiments uses Parquet, which needs pyarrow, the `store` extra:
 
 ```bash
-pip install "behav_utils[store] @ git+https://github.com/serkanshentyurk/behav_utils.git@v1.0.2"
+pip install "behav_utils[store] @ git+https://github.com/serkanshentyurk/behav_utils.git@v1.1.0"
 ```
 
 To work on the library, an editable checkout with the development tools: `pip install -e "<path to behav_utils>[dev]"`.
@@ -154,10 +154,10 @@ the line. See *Continuous responses* in [docs/config_guide.md](docs/config_guide
 
 ## Recordings alongside behaviour
 
-Not in 1.0. What the library provides now is `TrialArrays.trial_key`, an int64 identity per row (the session's hash
+Not yet. What the library provides now is `TrialArrays.trial_key`, an int64 identity per row (the session's hash
 above the trial number; stable across loads, unique across animals) that survives every `take`, `valid` and
 resample, and event times in seconds on each session's recording clock. Aligning pupil, imaging or spike data to
-trials through these is planned for 1.1 ([ROADMAP.md](ROADMAP.md)).
+trials through these is planned for 1.2 ([ROADMAP.md](ROADMAP.md)).
 
 ## Tests
 
@@ -174,8 +174,9 @@ is missing). After changing a statistic, regenerate its reference
 page with `python docs/gen_stats_reference.py`.
 
 `tests/test_golden.py` recomputes every statistic, readout, contrast and rolling statistic on two frozen datasets
-and compares them with pinned values: 2-AFC values pinned from 0.10.0, continuous ones from 1.0
-([tests/golden/README.md](tests/golden/README.md)). A change that moves a number fails it.
+and compares them with pinned values: 2-AFC values pinned from 0.10.0 (the session-unit intervals of the contrast
+from 1.1.0), continuous ones from 1.0 ([tests/golden/README.md](tests/golden/README.md)). A change that moves a
+number fails it.
 
 ## Versioning and maintenance
 
@@ -185,3 +186,6 @@ publishes a GitHub release with that version's CHANGELOG section.
 
 This repository is the canonical one; projects that take the library on should fork it and pin their fork's tags
 (see *Maintenance* in [CONTRIBUTING.md](CONTRIBUTING.md)).
+
+To cite the library, use [CITATION.cff](CITATION.cff) (GitHub shows it as *Cite this repository*) and give the
+version you used.

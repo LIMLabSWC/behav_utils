@@ -10,8 +10,7 @@ from .golden.continuous import outputs as golden_continuous
 
 @lru_cache(maxsize=1)
 def _actual() -> dict:
-    names = golden.read_expected()['stats_pooled']['stat'].unique().tolist()
-    return golden.compute_outputs(stat_names=names)
+    return golden.compute_outputs(stat_names=golden.pinned_stat_names())
 
 
 @pytest.mark.parametrize('table', golden.TABLES)

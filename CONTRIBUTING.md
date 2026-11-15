@@ -30,7 +30,9 @@ name in `docs/`, which only include them, so edit the root files.
 ## Before opening a PR
 - `ruff check src tests docs` is clean and `pytest tests -q` is green (CI runs both on 3.11 and 3.14, executes
   the tutorial notebooks, runs the code on every docs page, checks `docs/stats_reference.md` is regenerated, and
-  builds the docs with warnings as errors).
+  builds the docs with warnings as errors). A second CI job runs the suite on Python 3.11 with the oldest
+  versions of the dependencies that `pyproject.toml` allows. When it fails, raise the floor in `pyproject.toml`
+  to the oldest version that passes; do not add code for the older version.
 - `python docs/run_doc_examples.py` passes. It runs each page of the site on its own, top to bottom, with nothing
   set up out of sight, and loads every YAML block on it as a config. So a page builds what its examples use in a
   visible block, and docstrings hold no code: they describe, and point to the page where an example runs.
@@ -40,7 +42,8 @@ name in `docs/`, which only include them, so edit the root files.
 - Anything that changes a number (a stat definition, the resampling engine, the psychometric fit)
   bumps the minor version and is called out in `CHANGELOG.md`; projects pin results to these versions.
 - `tests/test_golden.py` stays green. A change that is meant to move numbers is marked ▲ in the CHANGELOG,
-  and the golden values are regenerated on the reference machine: `python tests/golden/make_golden.py`.
+  and the tables it moves are regenerated on the reference machine:
+  `python tests/golden/make_golden.py --table <name>` (see `tests/golden/README.md`).
 - A new or changed public name or signature: put the name in one sub-package's `__all__` (and the
   top-level `__all__` if it is used often), then regenerate the list with `python docs/gen_public_api.py`;
   `tests/test_public_api.py` fails until you do. Helpers shared across modules start with `_`.
@@ -78,8 +81,9 @@ and the public methods of the public classes:
 When an item from `ROADMAP.md` ships, remove it there and record it in the CHANGELOG, so the two lists never
 overlap.
 
-Bump `__version__` in `src/behav_utils/__init__.py` (pyproject reads it), add the CHANGELOG entry, then tag
-and push:
+Bump `__version__` in `src/behav_utils/__init__.py` (pyproject reads it), set the same version in the two
+install commands of `README.md` and in `CITATION.cff` (`tests/test_public_api.py` fails until all three agree),
+add the CHANGELOG entry, then tag and push:
 
 ```bash
 git tag -a vX.Y.Z -m "behav_utils X.Y.Z" && git push origin vX.Y.Z
@@ -125,6 +129,7 @@ how much a result would move if they are wrong. None is a known bug; each is a p
   asymmetric raw range therefore has different gain on the two sides of 0, which is what keeps the
   boundary at 0 and the ends at ±1, but means "0.3 from the boundary" is not the same raw distance on
   both sides. Fine for binning and the hard/easy split; think before interpreting `sigma` in raw units.
-- **Neural alignment is deliberately absent.** `TrialArrays.trial_key` is the hook; per-trial binning
-  of spikes or frames, sync tables and encoding models belong in the project. If a second project
-  needs the same alignment code, that is the moment to add a sibling package, not before.
+- **Recordings are not aligned to trials yet.** `TrialArrays.trial_key` and the per-session recording
+  clock are the hooks; until streams arrive (planned for 1.2, [ROADMAP.md](ROADMAP.md)), per-trial
+  binning of spikes or frames belongs in the project. Putting recordings on one clock stays the
+  experimenter's job after that too.

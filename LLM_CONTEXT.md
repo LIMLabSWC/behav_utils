@@ -79,6 +79,8 @@ tests/                              conftest (synthetic fixtures, test-local pre
   `n_permutations=0` by default and raises if asked for one between phases that share no session, or
   between phases that share trials (one trial class inside another, e.g. `post_opto` inside `non_opto`;
   `shared_trial_count`). Session-level conditions get bootstrap intervals with `units=('sessions',)`.
+  The session bootstrap draws the sessions two phases share once for both (a paired contrast); phases
+  with different sessions are drawn separately.
 - `select_sessions` applies `exclude_opto` / `exclude_types` before `first_n` / `last_n` / `last_fraction`
   (since 0.9.0): `last_n=5` with an exclusion is the last five sessions that are not excluded.
 - `PhaseStats.animal` comes from `session.metadata.animal_id`; `collect_rows(animal=...)` overrides it.

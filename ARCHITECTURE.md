@@ -154,8 +154,8 @@ accuracy) and `AnimalData.session_table` (one row per session built from it, for
 are the only computations; the statistics of a session come from `compute_phase_stats(per_session=True)`.
 
 ## What is deliberately not here
-Listed in [Concepts](docs/concepts/index.md): anything specific to one experiment, model fitting, and neural
-data beyond the trial key.
+Listed in [Concepts](docs/concepts/index.md): anything specific to one experiment, model fitting, and, until
+streams arrive ([ROADMAP.md](ROADMAP.md)), neural data beyond the trial key.
 
 ## Invariants worth knowing when changing things
 - `pool_arrays` and the loader's lag-1 freezing define `prev_*`; `TrialArrays.from_sequence` reproduces

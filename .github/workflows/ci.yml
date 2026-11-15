@@ -23,3 +23,17 @@ jobs:
         run: python docs/run_doc_examples.py
       - name: The generated stats reference is current
         run: python docs/gen_stats_reference.py && git diff --exit-code docs/stats_reference.md
+  # The suite on the oldest versions pyproject.toml allows (uv resolves each direct dependency to its lower
+  # bound). When this fails, raise that floor in pyproject.toml; do not add code for the older version.
+  floors:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+      - run: pip install uv
+      - name: Install with every dependency at its declared floor
+        run: uv pip install --system --resolution lowest-direct -e ".[store]"
+      - run: pip install pytest
+      - run: pip list
+      - run: pytest tests -q

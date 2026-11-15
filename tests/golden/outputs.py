@@ -126,16 +126,33 @@ def library_versions() -> dict:
             'platform': f'{platform.system()}-{platform.machine()}'}
 
 
-def write_expected() -> None:
+def pinned_stat_names() -> list:
+    """The statistics ``expected/`` holds, in its order: the set the golden values were pinned for."""
+    return pd.read_csv(EXPECTED_DIR / 'stats_pooled.csv')['stat'].unique().tolist()
+
+
+def write_expected(tables=None) -> None:
+    """Rewrite ``expected/`` from the current code: every table, or only the ones named.
+
+    The statistics are the pinned ones (``pinned_stat_names``). Naming tables rewrites those files alone and
+    leaves ``versions.json`` as it is, so the other tables keep the versions they were pinned on.
+    """
     import behav_utils
-    tables = compute_outputs()
+    chosen = TABLES if tables is None else tuple(tables)
+    unknown = [t for t in chosen if t not in TABLES]
+    if unknown:
+        raise ValueError(f'unknown golden table(s) {unknown}; the tables are {list(TABLES)}')
+    computed = compute_outputs(stat_names=pinned_stat_names())
     EXPECTED_DIR.mkdir(exist_ok=True)
-    for name, df in tables.items():
-        df.to_csv(EXPECTED_DIR / f'{name}.csv', index=False, float_format='%.17g')
-    meta = {**library_versions(), 'python': platform.python_version(),
-            'behav_utils': behav_utils.__version__}
-    VERSIONS_FILE.write_text(json.dumps(meta, indent=2) + '\n')
-    print(f'wrote {len(tables)} tables to {EXPECTED_DIR} ({meta})')
+    for name in chosen:
+        computed[name].to_csv(EXPECTED_DIR / f'{name}.csv', index=False, float_format='%.17g')
+    if tables is None:
+        meta = {**library_versions(), 'python': platform.python_version(),
+                'behav_utils': behav_utils.__version__}
+        VERSIONS_FILE.write_text(json.dumps(meta, indent=2) + '\n')
+        print(f'wrote {len(chosen)} tables to {EXPECTED_DIR} ({meta})')
+    else:
+        print(f'wrote {list(chosen)} to {EXPECTED_DIR}; versions.json left as it was')
 
 
 @lru_cache(maxsize=1)

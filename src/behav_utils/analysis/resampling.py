@@ -6,7 +6,8 @@ Drawing (``downsample`` and the ``resample_*`` functions): draws trials, lag-1 p
 from a phase, with or without replacement, keeping each trial's frozen ``prev_*`` predecessor so trial
 history survives the draw. Order-dependent statistics are refused (``is_exchangeable``).
 Summaries (``bootstrap_phase_stats``, ``permute_phase_difference``, ``summarise_draws``): percentile
-intervals, bootstrap p against zero and permutation p from the draws.
+intervals, bootstrap p against zero and permutation p from the draws. A contrast's session bootstrap draws
+all its phases together (``_bootstrap_sessions_jointly``): sessions two phases share are drawn once for both.
 """
 
 from __future__ import annotations
@@ -107,15 +108,18 @@ def downsample(clean, n, unit='trials', with_replacement=True, n_bins=8, rng=Non
     Args:
         clean: The sessions, already filtered.
         n: How many of ``unit`` to draw.
-        unit: 'trials' or 'sessions'.
+        unit: 'trials' (responded trials) or 'pairs' (post-correct pairs).
         with_replacement: Draw with replacement (a bootstrap resample) or without (a subsample).
-        n_bins: Stimulus bins for stratifying a trial draw.
-        rng: Random generator; None starts a fresh one.
+        n_bins: Stimulus bins for stratifying the draw.
+        rng: A random generator or an int seed; None starts a fresh generator.
 
     Returns:
         The drawn sessions.
+
+    Raises:
+        ValueError: ``unit`` is neither 'trials' nor 'pairs'.
     """
-    rng = rng if rng is not None else np.random.default_rng()
+    rng = np.random.default_rng(rng)
     pooled = pool_arrays(clean)
     if pooled['n_trials'] == 0:
         return []
@@ -420,6 +424,83 @@ def bootstrap_phase_stats(
         phase, names, n=draw_n, n_repeats=n_draws,
         with_replacement=True, unit=unit, seed=seed,
     )
+
+
+def _session_groups(phases) -> list:
+    """
+    The groups whole sessions are drawn within: sessions that belong to the same set of phases.
+
+    Two phases cut from the same sessions (laser on and off) put those sessions in one group, so a draw
+    takes the same sessions for both. Phases with different sessions (two stages) each get a group of their
+    own. Where the sessions only partly overlap, the shared ones form one group and the rest another.
+
+    Args:
+        phases: ``{label: [SessionData]}``.
+
+    Returns:
+        ``[(labels, session_ids)]``: the phases a group belongs to, and its session ids, both in
+        order of first appearance.
+    """
+    members: dict = {}
+    for label, phase in phases.items():
+        for session in phase:
+            owners = members.setdefault(session.session_id, [])
+            if label not in owners:
+                owners.append(label)
+    groups: dict = {}
+    for session_id, owners in members.items():
+        groups.setdefault(tuple(owners), []).append(session_id)
+    return list(groups.items())
+
+
+def _bootstrap_sessions_jointly(phases, names: Sequence[str], *, n_draws: int = 1000, seed: int = 0) -> dict:
+    """
+    Session bootstrap of several phases at once, pairing the sessions they share.
+
+    Each draw resamples whole sessions with replacement within every group of ``_session_groups``,
+    and every phase takes its own trials from the sessions drawn. A phase therefore keeps its number of
+    sessions, and two phases cut from the same sessions get the same sessions in every draw, so the
+    session-to-session variation they share cancels in their difference. A group of one session is the
+    same in every draw, so its variation is left out; ``compute_delta_stat`` warns about it.
+
+    Args:
+        phases: ``{label: [SessionData]}``, each phase from ``filter_trials``.
+        names: Scalar stat names; any stat is accepted, as whole sessions keep their trial order.
+        n_draws: Number of draws.
+        seed: Random seed.
+
+    Returns:
+        ``{label: frame}``, one (n_draws × names) frame per phase, row ``i`` of every frame from draw ``i``.
+    """
+    names = _validate_names(names)
+    labels = list(phases)
+    by_id = {}
+    for label in labels:
+        by_id[label] = {}
+        for session in phases[label]:
+            by_id[label].setdefault(session.session_id, []).append(session)
+    groups = [(owners, np.asarray(ids, dtype=object)) for owners, ids in _session_groups(phases)]
+
+    rng = np.random.default_rng(seed)
+    # one stream per phase for stochastic stats, apart from the stream that draws the sessions
+    jitter = {label: np.random.default_rng([seed, 2654435761, i]) for i, label in enumerate(labels)}
+    out = {label: np.full((n_draws, len(names)), np.nan) for label in labels}
+
+    for r in range(n_draws):
+        drawn = {label: [] for label in labels}
+        for owners, ids in groups:
+            for session_id in ids[rng.integers(0, len(ids), size=len(ids))]:
+                for label in owners:
+                    drawn[label].extend(by_id[label][session_id])
+        for label in labels:
+            if not drawn[label]:
+                continue
+            arrays = TrialArrays.from_sessions(drawn[label])
+            if arrays.n_trials == 0:
+                continue
+            out[label][r] = compute_stats(arrays, names, rng=jitter[label], strict=False).to_numpy()
+
+    return {label: pd.DataFrame(out[label], columns=list(names)) for label in labels}
 
 
 def _trial_keys(phase) -> set:

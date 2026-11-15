@@ -25,7 +25,12 @@ import numpy as np
 import pytest
 
 from behav_utils.analysis.comparison import DeltaStats, Interaction, compute_delta_stat, compute_interaction
-from behav_utils.analysis.resampling import bootstrap_phase_stats, permute_phase_difference, summarise_draws
+from behav_utils.analysis.resampling import (
+    _session_groups,
+    bootstrap_phase_stats,
+    permute_phase_difference,
+    summarise_draws,
+)
 from behav_utils.data.arrays import TrialArrays
 from behav_utils.data.structures import SessionData, SessionMetadata, TrialData
 from behav_utils.stats import PSYCHOMETRIC, compute_stats
@@ -174,6 +179,90 @@ class TestComputeDeltaStat:
         with pytest.raises(ValueError):
             compute_delta_stat({'ref': _phase(seed=1), 'x': _phase(seed=2)}, ['accuracy'],
                                reference='absent', **FF)
+
+
+def _phase_with_accuracy(accuracies, n=100, trial_offset=0, prefix='s'):
+    """One session per value, with exactly that accuracy over ``n`` responded trials."""
+    sessions = []
+    for i, accuracy in enumerate(accuracies):
+        stim = np.linspace(-1, 1, n)
+        cat = (stim > 0).astype(float)
+        ch = cat.copy()
+        wrong = np.arange(n - round(accuracy * n))
+        ch[wrong] = 1 - ch[wrong]
+        tr = TrialData(trial_number=np.arange(n) + trial_offset, stimulus=stim, category=cat, choice=ch,
+                       outcome=(ch == cat).astype(float), correct=(ch == cat), abort=np.zeros(n, bool),
+                       opto_on=np.zeros(n, bool))
+        sessions.append(SessionData(
+            session_id=f'{prefix}_{i}', session_idx=i, date=date(2026, 1, 1) + timedelta(days=i),
+            metadata=SessionMetadata(fields={'stage': 'Full_Task_Cont', 'distribution': 'Uniform'}),
+            trials=tr, session_type='regular'))
+    return sessions
+
+
+class TestSessionDrawsArePaired:
+    """The session bootstrap draws all phases together: sessions two phases share are drawn once for both."""
+
+    LEVELS = (0.9, 0.7, 0.8, 0.6, 0.75)
+    KW = dict(reference='ref', curve=False, n_permutations=0, n_bootstrap=60, units=('sessions',), seed=3)
+
+    def _same_sessions(self):
+        ref = _phase_with_accuracy(self.LEVELS)
+        x = _phase_with_accuracy([a - 0.2 for a in self.LEVELS], trial_offset=1000)
+        return ref, x
+
+    def test_groups_follow_which_phases_hold_a_session(self):
+        ref, x = self._same_sessions()
+        ids = [s.session_id for s in ref]
+        assert _session_groups({'ref': ref, 'x': x}) == [(('ref', 'x'), ids)]
+        assert _session_groups({'ref': ref, 'x': x[:3]}) == [(('ref', 'x'), ids[:3]), (('ref',), ids[3:])]
+        other = _phase_with_accuracy(self.LEVELS, prefix='t')
+        other_ids = [s.session_id for s in other]
+        assert _session_groups({'ref': ref, 'x': other}) == [(('ref',), ids), (('x',), other_ids)]
+
+    def test_shared_session_variation_cancels_in_the_difference(self):
+        """Every session is 0.2 less accurate in x, so with the same sessions drawn for both phases the
+        difference is -0.2 in every draw, however much the sessions differ from each other."""
+        ref, x = self._same_sessions()
+        r = compute_delta_stat({'ref': ref, 'x': x}, ['accuracy'], **self.KW)
+        assert r.phases['ref'].draws['sessions']['accuracy'].std() > 0.01
+        np.testing.assert_allclose(r.contrast('x').difference_draws['sessions']['accuracy'], -0.2, atol=1e-12)
+
+    def test_phases_with_different_sessions_are_drawn_separately(self):
+        ref = _phase_with_accuracy(self.LEVELS)
+        x = _phase_with_accuracy([a - 0.2 for a in self.LEVELS], prefix='t')
+        r = compute_delta_stat({'ref': ref, 'x': x}, ['accuracy'], **self.KW)
+        assert r.contrast('x').difference_draws['sessions']['accuracy'].std() > 0.01
+
+    def test_every_draw_keeps_each_phase_its_number_of_sessions(self):
+        """Sessions score 1.0 or 0.5, so a draw of k sessions has an accuracy that is a multiple of 1/(2k);
+        a draw of any other number of sessions would not."""
+        levels = (1.0, 0.5, 1.0, 0.5, 1.0)
+        ref = _phase_with_accuracy(levels)
+        x = _phase_with_accuracy(levels[:3], trial_offset=1000)
+        y = _phase_with_accuracy(levels[:2], prefix='t')
+        r = compute_delta_stat({'ref': ref, 'x': x, 'y': y}, ['accuracy'], **self.KW)
+        for label, k in (('ref', 5), ('x', 3), ('y', 2)):
+            scaled = r.phases[label].draws['sessions']['accuracy'].to_numpy() * 2 * k
+            np.testing.assert_allclose(scaled, np.round(scaled), atol=1e-9)
+            assert len(set(np.round(scaled))) > 1
+
+    def test_a_session_alone_in_its_group_warns(self):
+        ref, x = self._same_sessions()
+        with pytest.warns(UserWarning, match="no other session in the same phases.*'s_4' \\(in 'ref'\\)"):
+            compute_delta_stat({'ref': ref, 'x': x[:4]}, ['accuracy'], **self.KW)
+
+    def test_same_seed_same_draws(self):
+        ref, x = self._same_sessions()
+        a = compute_delta_stat({'ref': ref, 'x': x}, ['accuracy'], **self.KW)
+        b = compute_delta_stat({'ref': ref, 'x': x}, ['accuracy'], **self.KW)
+        assert a.phases['x'].draws['sessions'].equals(b.phases['x'].draws['sessions'])
+
+    def test_a_phase_with_one_session_gets_no_session_draws(self):
+        ref, x = self._same_sessions()
+        r = compute_delta_stat({'ref': ref, 'x': x[:1]}, ['accuracy'], **self.KW)
+        assert 'sessions' in r.phases['ref'].draws and 'sessions' not in r.phases['x'].draws
+        assert r.contrast('x').difference_draws == {}
 
 
 class TestComputeInteraction:

@@ -4,6 +4,7 @@ docs/public_api.md is current."""
 import importlib
 import importlib.metadata
 import importlib.util
+import re
 from pathlib import Path
 
 import pytest
@@ -82,3 +83,13 @@ def test_version_matches_the_installed_metadata():
     except importlib.metadata.PackageNotFoundError:
         pytest.skip('behav_utils is not installed')
     assert installed == behav_utils.__version__, 'reinstall: pip install -e ".[dev]"'
+
+
+def test_readme_and_citation_carry_the_version():
+    """The install commands in the README and CITATION.cff are written by hand; a release must update both."""
+    pins = re.findall(r'behav_utils\.git@v([0-9][^"\s]*)', (ROOT / 'README.md').read_text())
+    assert pins and set(pins) == {behav_utils.__version__}, \
+        f'README.md installs {sorted(set(pins))}, the version is {behav_utils.__version__}'
+    cited = re.findall(r'^version:\s*"?([^"\s]+)"?\s*$', (ROOT / 'CITATION.cff').read_text(), flags=re.M)
+    assert cited == [behav_utils.__version__], \
+        f'CITATION.cff gives {cited}, the version is {behav_utils.__version__}'

@@ -1,0 +1,12 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it using the metadata below."
+type: software
+title: "behav_utils: analysis library for trial-based behavioural experiments"
+abstract: "Config-driven loading, scoring by task, statistics, readouts, contrasts, simulation and plotting for trial-based behavioural experiments."
+authors:
+  - family-names: Shentyurk
+    given-names: Serkan
+version: 1.1.0
+license: Apache-2.0
+repository-code: "https://github.com/serkanshentyurk/behav_utils"
+url: "https://serkanshentyurk.github.io/behav_utils/"

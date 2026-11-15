@@ -64,6 +64,17 @@ def test_downsample_keeps_lag1_pairing(clean):
         assert all((ps, pc) in srcs for ps, pc in zip(t.prev_stimulus, t.prev_choice) if not np.isnan(ps))
 
 
+def test_downsample_takes_an_int_seed(clean):
+    a = downsample(clean, 150, rng=4)
+    b = downsample(clean, 150, rng=np.random.default_rng(4))
+    assert [s.trials.trial_number.tolist() for s in a] == [s.trials.trial_number.tolist() for s in b]
+
+
+def test_downsample_refuses_the_session_unit(clean):
+    with pytest.raises(ValueError, match="'trials' or 'pairs'"):
+        downsample(clean, 150, unit='sessions')
+
+
 def test_downsample_empty_in_empty_out():
     assert downsample([], 10) == []
 
