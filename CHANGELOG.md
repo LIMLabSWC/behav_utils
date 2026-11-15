@@ -26,7 +26,10 @@ as 1.0.2.
   `--table` the script failed in 1.0.2, because it asked for statistics the 2-AFC task cannot compute; it now
   uses the pinned statistics. Only the session-unit rows of `delta.csv` changed.
 - CI runs the suite on Python 3.11 with the oldest dependency versions `pyproject.toml` allows, so the declared
-  floors are tested.
+  floors are tested. Its first run raised two of them: pandas to 2.1 (`paired_diff` relies on
+  `pivot_table(dropna=False)` keeping rows whose label columns are empty, which older pandas dropped) and numpy to
+  1.24.1 (in 1.24.0 `np.ma.masked_invalid` returns a mask that breaks matplotlib's `fill_between`, so the
+  psychometric band could not be drawn).
 - `CITATION.cff` added. A test keeps its version, and the version in the README's install commands, equal to
   `__version__`.
 - Streams (recordings aligned to trials) are now planned for 1.2; the README, the roadmap and the contributor
